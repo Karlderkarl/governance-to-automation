@@ -17,7 +17,7 @@ Structural blueprint for the generated pipeline. It is a proven issue-driven loo
 | `{{GOVERNANCE_REVIEW_FOCUS}}` | SOUL.md + AGENTS.md (see prompt-builders.md) | concise security/coding rule list |
 | `{{PERMISSION_MODE}}` / `{{SANDBOX}}` | Step 3 user opt-in | `bypassPermissions` / `danger-full-access` |
 
-For the **local task-list** source (no GitHub Issues), replace the `gh`-based candidate selection and PR/merge phases with: read the next unchecked task from the task-list file, branch, implement, check, review, commit, mark the task done. See `task-list-template.md`.
+For the **local task-list** source (no GitHub Issues), replace the `gh`-based candidate selection and PR/merge phases with: read the next unchecked task from the task-list file, branch, implement, check, review, commit, mark the task done. See `task-list-template.md`. Keep `--dry-run` **read-only** in this variant too: select/print the next task but do **not** flip its status or write the task file — a dirtied task file would trip the next run's clean-worktree guard.
 
 ## Skeleton
 
@@ -163,7 +163,12 @@ has_repo_changes_outside_logs() { [[ -n "$(git_status_outside_logs)" ]]; }
 require_clean_worktree() {
   if has_repo_changes_outside_logs; then
     log "Working tree dirty outside $LOGDIR. Refusing to mix changes."; return 1; fi; }
-stage_repo_changes() { git add -A -- . ":(exclude)$LOGDIR"; }
+# Stage all work, then unstage the log dir. NOTE: do NOT use
+# `git add -A -- . ":(exclude)$LOGDIR"` — when $LOGDIR is gitignored that pathspec
+# makes `git add` exit 1 (matched-but-ignored path), which aborts the run under
+# `set -e`. Plain `git add -A` skips ignored paths silently (exit 0); the reset then
+# drops logs if they happen to be tracked.
+stage_repo_changes() { git add -A; git reset -q -- "$LOGDIR" >/dev/null 2>&1 || true; }
 
 # --- Model runners: generate these from the Step 3 confirmed model/CLI mapping.
 # Example only: Sonnet/Opus may route through `claude -p`, Codex through `codex exec`.
@@ -225,10 +230,19 @@ ensure_checks_pass() {  # <issue> <logdir> <prefix>
 # build_implementation_prompt / build_review_prompt / build_fix_prompt
 # / build_refactor_prompt / build_memory_update_prompt / build_check_fix_prompt
 
-# --- Review: diff EXCLUDES MEMORY.md and uses {{BASE_BRANCH}} (not base..HEAD)
-#     so uncommitted fix-cycle changes are reviewed and status churn is hidden ---
+# --- Code diff vs {{BASE_BRANCH}}, INCLUDING new files. CRITICAL: plain
+#     `git diff <base>` omits UNTRACKED files, so a brand-new file from the
+#     implementation would be invisible and reviewers would approve an empty diff.
+#     Stage first (so new files register), then diff the index against base.
+#     Excludes MEMORY.md; logs are never staged (pathspec exclude + usually gitignored). ---
+stage_for_diff() { stage_repo_changes; }   # same staging; new files become visible to git diff
+code_diff() { stage_for_diff; git diff --cached "$BASE_BRANCH" -- . ":!$MEMORY_FILE"; }
+code_hash() { stage_for_diff; git diff --cached "$BASE_BRANCH" -- . ":!$MEMORY_FILE" | md5sum; }
+
+# --- Review: uses code_diff (full uncommitted work vs {{BASE_BRANCH}} — new files
+#     included, MEMORY.md excluded) so status churn is hidden but real changes are not ---
 run_review() {  # <label> <runner_fn> <issue> <title> <body> <logfile> <logdir>
-  local diff; diff="$(git diff "$BASE_BRANCH" -- . ":!$MEMORY_FILE" 2>/dev/null || true)"
+  local diff; diff="$(code_diff 2>/dev/null || true)"
   [[ -z "$diff" ]] && { echo "LGTM (no changes)" > "$6"; return 0; }
   build_review_prompt "$1" "$3" "$4" "$5" "$diff" "$7/prompt-review.txt"
   "$2" "$7/prompt-review.txt" > "$6" 2>&1
@@ -256,10 +270,10 @@ review_until_pass() {  # <issue> <title> <body> <logdir> <stage>
     [[ "$ap" == true && "$bp" == true ]] && { REVIEW_OUTCOME=clean; return 0; }
     [[ "$round" -ge "$MAX_ROUNDS" ]] && { REVIEW_OUTCOME=failed; return 1; }
     local before after
-    before="$(git diff "$BASE_BRANCH" -- . ":!$MEMORY_FILE" ":!$LOGDIR" | md5sum)"
+    before="$(code_hash)"
     build_fix_prompt "$issue" "$title" "$body" "$a" "$b" "$round" "$logdir/$stage-fix-r$round.txt"
     run_impl_model "$logdir/$stage-fix-r$round.txt" > "$logdir/$stage-fix-r$round.log" 2>&1
-    after="$(git diff "$BASE_BRANCH" -- . ":!$MEMORY_FILE" ":!$LOGDIR" | md5sum)"
+    after="$(code_hash)"
     [[ "$before" == "$after" ]] && {
       log "No code change in fix cycle; remaining findings accepted."; REVIEW_OUTCOME=accepted-noop; return 0; }
     ensure_checks_pass "$issue" "$logdir" "$stage-checks-r$round" || { REVIEW_OUTCOME=failed; return 1; }
@@ -281,10 +295,10 @@ refactor_stage() {  # <issue> <title> <body> <logdir>
   [[ "$REFACTOR" == true ]] || { log "Refactor pass disabled (--no-refactor)."; return 0; }
   local issue="$1" title="$2" body="$3" logdir="$4" r=1 before after ok
   while [[ "$r" -le "$MAX_REFACTOR_ROUNDS" ]]; do
-    before="$(git diff "$BASE_BRANCH" -- . ":!$MEMORY_FILE" ":!$LOGDIR" | md5sum)"
+    before="$(code_hash)"
     build_refactor_prompt "$issue" "$title" "$body" "$r" "$logdir/05-refactor-r$r.txt"
     run_impl_model "$logdir/05-refactor-r$r.txt" > "$logdir/05-refactor-r$r.log" 2>&1
-    after="$(git diff "$BASE_BRANCH" -- . ":!$MEMORY_FILE" ":!$LOGDIR" | md5sum)"
+    after="$(code_hash)"
     [[ "$before" == "$after" ]] && { log "Refactor round $r: no change; code already clean."; return 0; }
     log "Refactor round $r changed code; re-checking and re-reviewing."
     ok=true
@@ -391,6 +405,9 @@ log "Done. Completed $COMPLETED issue(s)."
 ## Generation rules
 
 - **Keep the guards.** `require_clean_worktree`, dependency blocking, and the `git checkout "$orig"` rollback on failure are what make the loop safe to re-run.
+- **Review/no-op diffs must include new files.** Build every review diff and no-op `md5sum` from a *staged* diff (`stage_for_diff` + `git diff --cached <base>`), never plain `git diff <base>` — the latter omits untracked files, so a brand-new implementation file would be reviewed as an empty diff and silently approved. Use the `code_diff` / `code_hash` helpers everywhere a code diff is needed.
+- **Stage with `git add -A` + unstage `$LOGDIR`, not `git add -- . :(exclude)$LOGDIR`.** When the log dir is gitignored (the recommended setup), the `:(exclude)` pathspec makes `git add` exit 1 on the matched-but-ignored path, which kills the run under `set -e`. Plain `git add -A` skips ignored paths silently; follow with `git reset -q -- "$LOGDIR"` to keep logs out of commits when they are *not* ignored.
+- **`--dry-run` is side-effect-free.** It may select and print candidate work but must never mutate tracked files — no task-status flip, no commit, no PR. In the local task-list variant, guard `task_mark_status` (and any task-file write) behind `[[ "$DRY_RUN" != true ]]`; a dirtied task file would trip the next run's clean-worktree guard.
 - **Memory rules are mandatory** (see SKILL.md *Memory discipline*): the review diff must exclude `{{MEMORY_FILE}}`; the no-op `md5sum` comparison must exclude `{{MEMORY_FILE}}` and `$LOGDIR`; only `build_memory_update_prompt` writes the archive entry.
 - **Diff against `{{BASE_BRANCH}}`, not `BASE..HEAD`** — uncommitted fix-cycle changes must be visible to reviewers or the loop never converges.
 - **Share the review loop.** `review_until_pass` is the single A/B-review-plus-fix implementation; the correctness pass and the refactor re-validation both call it. Do not duplicate the review/no-op logic. It exposes `REVIEW_OUTCOME` (`clean` / `accepted-noop` / `failed`) so callers can tell a clean pass from a tolerated no-op.

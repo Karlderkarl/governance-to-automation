@@ -85,6 +85,7 @@ How the script consumes it (replacing the `gh` selection in the template):
 - Derive the branch from the task number/title.
 - After review passes, the memory step flips `status: open → done` (and archives the completed line) — the task-list file is the local analogue of "closing the issue".
 - A task with unmet dependencies is skipped silently, exactly like `Depends on #N`.
+- **`--dry-run` must stay read-only**: print the task it *would* run, but do **not** flip `status` or otherwise write the task file. A dry-run that dirties `refact-todo.md` would trip the next real run's clean-worktree guard. Guard the status flip behind the dry-run check.
 
 ## Option C — MEMORY.md "Next Up" (minimal projects only)
 
