@@ -4,19 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-This is a **Claude Code skill-authoring repository**. It does not contain an application — its "source" is a suite of skills (Markdown + one example shell script) that implement a two-stage **governance → automation** pipeline for *other* projects:
+This is a **Claude Code skill-authoring repository**. It does not contain an application — its "source" is the **`governance-to-automation`** skill (Markdown + one example shell script): the second stage of a two-stage **governance → automation** pipeline for *other* projects. The first stage, **`prd-to-governance`**, is a **separate skill** at [github.com/Karlderkarl/prd-to-governance](https://github.com/Karlderkarl/prd-to-governance) — it is **not** vendored or shipped here.
 
 ```
 Idea/PRD ─▶ prd-to-governance ─▶ SOUL.md / AGENTS.md / CLAUDE.md / MEMORY.md ─▶ governance-to-automation ─▶ auto-develop.sh
-            (what & how to build)        (the governance contract)              (generates the build loop)     (runs autonomously)
+            (separate skill/repo)       (the governance contract)              (this repo)                  (runs autonomously)
 ```
 
-- **`.agents/skills/prd-to-governance/`** — turns a PRD + repo reality into the four governance files; defines **how and where memory is managed** (`MEMORY.md` vs `memory/completed-phases.md`, status-line discipline, drift markers). **Vendored** from GitHub `Karlderkarl/prd-to-governance` and tracked by `skills-lock.json` (with a content hash) — prefer sending fixes upstream rather than editing the vendored copy in place. **One deliberate local exception:** its frontmatter carries `metadata.internal: true` so `skills.sh` does not re-publish prd-to-governance from this repo (this repo ships only `governance-to-automation`). `skills-lock.json`'s `computedHash` is the skills CLI's folder-content hash (`computeSkillFolderHash`: sha256 over each file's path + bytes, case-insensitively sorted) and has been regenerated to match the local copy *including* that flag — so `skills` sync sees it as up-to-date. After re-vendoring from upstream, re-apply `metadata.internal: true` and let the CLI regenerate the hash.
-- **`.agents/skills/governance-to-automation/`** — **locally authored**. Reads the governance files and *generates* a project-tailored `auto-develop.sh` (plus task source, prompt builders, logging). It does **not** implement features; it writes the machinery that does.
+- **`prd-to-governance`** (separate repo) — turns a PRD + repo reality into the four governance files; defines **how and where memory is managed** (`MEMORY.md` vs `memory/completed-phases.md`, status-line discipline, drift markers). Its repo is the source of truth for the governance-file structure and update rules; this repo only *references* it.
+- **`.agents/skills/governance-to-automation/`** — the skill this repo authors and ships. Reads the governance files and *generates* a project-tailored `auto-develop.sh` (plus task source, prompt builders, logging). It does **not** implement features; it writes the machinery that does.
 
-## The contract between the two skills (most important architecture)
+## The contract with prd-to-governance (most important architecture)
 
-The skills are deliberately coupled through **memory-management discipline**. `prd-to-governance` declares the rules in `MEMORY.md`'s *Update Rules*; `governance-to-automation` must encode the *exact same* rules into every `auto-develop.sh` it generates. When changing either skill, keep these invariants aligned on both sides:
+This skill is deliberately coupled to `prd-to-governance` through **memory-management discipline**. `prd-to-governance` declares the rules in `MEMORY.md`'s *Update Rules*; `governance-to-automation` must encode the *exact same* rules into every `auto-develop.sh` it generates. Keep these invariants aligned with what `prd-to-governance` defines (its repo is authoritative):
 
 - Review diffs **exclude** `MEMORY.md` (`git diff <base> -- . ':!MEMORY.md'`) so status churn never bloats reviewer context.
 - The implement/fix steps write **one overwritten** "Next Up" line — never append.
@@ -28,7 +28,7 @@ A second boundary: the automation may write **only `MEMORY.md`** + generated art
 
 ## Skill anatomy & authoring conventions
 
-Each skill is a directory with `SKILL.md` (YAML frontmatter `name` + `description`, then the workflow) and a `references/` folder of structural blueprints loaded on demand. Conventions shared across both skills — match them when editing or adding skills:
+The skill is a directory with `SKILL.md` (YAML frontmatter `name` + `description`, then the workflow) and a `references/` folder of structural blueprints loaded on demand. Conventions to match when editing the skill:
 
 - **Uncertainty markers**: `[NEEDS GOVERNANCE]`, `[NEEDS PRD CLARIFICATION]`, `[NEEDS CODEBASE DISCOVERY]`, `[USER DECISION REQUIRED]`, `[GOVERNANCE DRIFT]`.
 - **Priority levels**: **Critical** / **Required** / **Advisory**, used only where they sharpen real stakes.

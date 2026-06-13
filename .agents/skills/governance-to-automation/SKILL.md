@@ -7,8 +7,8 @@ description: "Generate (and keep in sync) the automation that executes a project
 
 This skill **generates the automation** that runs a project end to end. It is the execution counterpart to `prd-to-governance`:
 
-- `prd-to-governance` is the **blueprint for splitting the project into files** (`SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`) and it defines **how and where memory is managed** (what goes into `MEMORY.md` vs `memory/completed-phases.md`, the status-line discipline, drift handling).
-- `governance-to-automation` reads that governance and **emits the runnable pipeline** — primarily an `auto-develop.sh` script that processes tasks autonomously: implement → check → review → fix → refactor → re-review → commit → PR. The script *embodies* the memory rules the governance prescribes.
+- `prd-to-governance` is a **separate skill** — [github.com/Karlderkarl/prd-to-governance](https://github.com/Karlderkarl/prd-to-governance) — that produces the four governance files (`SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`) and defines **how and where memory is managed** (what goes into `MEMORY.md` vs `memory/completed-phases.md`, the status-line discipline, drift handling). **For the structure and update rules of `MEMORY.md` and the other governance files, see that skill.**
+- `governance-to-automation` (this skill) reads that governance and **emits the runnable pipeline** — primarily an `auto-develop.sh` script that processes tasks autonomously: implement → check → review → fix → refactor → re-review → commit → PR. The script *embodies* the memory rules the governance prescribes.
 
 The skill does **not** itself implement features. It writes the machinery that does, configured to one specific project's contract.
 
@@ -44,7 +44,7 @@ The four governance files are authoritative inputs. This skill consumes them and
 - **No-op fix detection** — if a fix cycle changes only `MEMORY.md`/logs and no real code, remaining findings are accepted deviations and the review loop breaks (prevents infinite loops).
 - **Dependency blocking** — `Depends on #N` (or the task-list equivalent) hard-blocks a task until its dependencies are done.
 
-If the governance does not yet specify these, that is `[NEEDS GOVERNANCE]` — route back to `prd-to-governance` rather than inventing the policy here.
+If the governance does not yet specify these, that is `[NEEDS GOVERNANCE]` — route back to the `prd-to-governance` skill ([github.com/Karlderkarl/prd-to-governance](https://github.com/Karlderkarl/prd-to-governance)), which owns the structure and update rules for `MEMORY.md` and the other governance files, rather than inventing the policy here.
 
 ## Two-pass pipeline: correctness, then refactor
 

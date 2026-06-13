@@ -1,11 +1,10 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This is a Claude Code **skill-authoring** repository, not an application. Its content is a suite of skills that implement a two-stage **governance → automation** pipeline for *other* projects:
-- `.agents/skills/prd-to-governance/` — **vendored** from GitHub (`Karlderkarl/prd-to-governance`, tracked by `skills-lock.json` with a content hash). Generates the four governance files (`SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`). Prefer sending fixes upstream over editing the vendored copy in place. One deliberate local exception: its frontmatter sets `metadata.internal: true` so `skills.sh` ships only `governance-to-automation` from this repo. `skills-lock.json`'s `computedHash` (the CLI's folder-content hash) was regenerated to include that flag, so sync sees it as up-to-date; re-apply the flag and regenerate the hash after any re-vendor.
-- `.agents/skills/governance-to-automation/` — **locally authored**. Reads governance and generates a project-tailored, stack-agnostic `auto-develop.sh`.
+This is a Claude Code **skill-authoring** repository, not an application. It ships **one skill**, `governance-to-automation` — the second stage of a two-stage **governance → automation** pipeline for *other* projects. The first stage, `prd-to-governance`, is a **separate skill** at `github.com/Karlderkarl/prd-to-governance` (not vendored here).
+- `.agents/skills/governance-to-automation/` — the skill this repo authors. Reads governance and generates a project-tailored, stack-agnostic `auto-develop.sh`.
 
-Each skill is a `SKILL.md` (YAML frontmatter + workflow) plus a `references/` folder of on-demand blueprints. The `examples/` folder holds **sample outputs** (`auto-develop.payload-sample.sh`, `refact-todo.md`) generated for a Node/pnpm + Payload CMS project — read-only fixtures, not this repository's own build system, and the sample script must not be run here (it carries that project's opt-in privileged defaults). `CLAUDE.md` holds the detailed architecture and the contract between the two skills — read it first.
+The skill is a `SKILL.md` (YAML frontmatter + workflow) plus a `references/` folder of on-demand blueprints. The `examples/` folder holds **sample outputs** (`auto-develop.payload-sample.sh`, `refact-todo.md`) generated for a Node/pnpm + Payload CMS project — read-only fixtures, not this repository's own build system, and the sample script must not be run here (it carries that project's opt-in privileged defaults). `CLAUDE.md` holds the detailed architecture and the contract with `prd-to-governance` — read it first.
 
 ## Build, Test, and Development Commands
 There is no application toolchain (Markdown + one example Bash script). The meaningful checks:
@@ -19,7 +18,7 @@ When `governance-to-automation` generates a script, validate it the same way (`b
 Match the style of the files you touch. Skills share a vocabulary: uncertainty markers (`[NEEDS GOVERNANCE]`, `[NEEDS PRD CLARIFICATION]`, `[NEEDS CODEBASE DISCOVERY]`, `[USER DECISION REQUIRED]`, `[GOVERNANCE DRIFT]`), priority levels (**Critical** / **Required** / **Advisory**), "link, don't duplicate" (read governance, never copy large text), and stack-agnostic generation (never assume a toolchain). Prefer lowercase-hyphenated Markdown filenames such as `task-list-template.md`.
 
 ## Testing Guidelines
-No test framework. Validate changes by syntax- and lint-checking scripts and dry-running generated pipelines. When changing either skill, keep the governance ↔ automation **memory-discipline invariants** aligned on both sides (diff exclusion of `MEMORY.md`, single overwritten "Next Up" line, archive-only completed work, no-op fix detection, `Depends on #N` blocking) — see `CLAUDE.md`.
+No test framework. Validate changes by syntax- and lint-checking scripts and dry-running generated pipelines. When changing the skill, keep the **memory-discipline invariants** aligned with what `prd-to-governance` defines (diff exclusion of `MEMORY.md`, single overwritten "Next Up" line, archive-only completed work, no-op fix detection, `Depends on #N` blocking) — see `CLAUDE.md`.
 
 ## Commit & Pull Request Guidelines
 Use Conventional Commit prefixes (`feat:`, `fix:`, `docs:`, `chore:`). Keep commits scoped to one concern. Pull requests should state the purpose, summarize the changed files, and note verification (`bash -n` / `shellcheck` / `--dry-run`).

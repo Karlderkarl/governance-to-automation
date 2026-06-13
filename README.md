@@ -1,41 +1,39 @@
 # Governance Skills
 
-Skills for turning project requirements into governance files and then turning that governance
-into an automated implementation pipeline.
+Turn project requirements into governance files, then turn that governance into an automated
+implementation pipeline. **This repository ships the `governance-to-automation` skill.**
+`prd-to-governance` is a separate, companion skill with its own repo.
 
 ## Skills
 
-- `prd-to-governance`
-  Create, update, and audit `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, and `MEMORY.md` from a PRD and the current repository state.
-- `governance-to-automation`
-  Generate and keep in sync an issue-driven `auto-develop.sh` pipeline plus its task source, prompt builders, and logging from existing governance.
+- **`governance-to-automation`** — *this repo*
+  Generate and keep in sync an issue-driven `auto-develop.sh` pipeline (implement → check →
+  dual-review → fix → refactor → re-review → commit → PR) plus its task source, prompt builders,
+  and logging, from existing governance.
+- **`prd-to-governance`** — *separate skill:* <https://github.com/Karlderkarl/prd-to-governance>
+  Create, update, and audit `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, and `MEMORY.md` from a PRD and the
+  current repository state. It owns the **structure and update rules** of those governance files
+  (including `MEMORY.md`); `governance-to-automation` consumes them.
 
 ## Install
-
-Install the whole repository:
 
 ```bash
 npx skills add Karlderkarl/governance-to-automation
 ```
 
-List available skills first:
+The companion skill installs from its own repo:
 
 ```bash
-npx skills add Karlderkarl/governance-to-automation --list
+npx skills add Karlderkarl/prd-to-governance
 ```
 
-Install one specific skill:
-
-```bash
-npx skills add Karlderkarl/governance-to-automation --skill prd-to-governance
-npx skills add Karlderkarl/governance-to-automation --skill governance-to-automation
-```
+Requires [Claude Code](https://claude.ai/code).
 
 ## Repository Layout
 
-The skill definitions live in `.agents/skills/`:
+The skill definition lives in `.agents/skills/`:
 
-- `.agents/skills/prd-to-governance/SKILL.md`
-- `.agents/skills/governance-to-automation/SKILL.md`
-
-Supporting reference material is stored next to each skill in its `references/` directory.
+- `.agents/skills/governance-to-automation/SKILL.md` — entry point
+- `.agents/skills/governance-to-automation/references/` — structural blueprints
+  (`auto-develop-template.md`, `prompt-builders.md`, `task-list-template.md`, `extraction-checklist.md`)
+- `examples/` — a fully-resolved sample output (read-only fixture)

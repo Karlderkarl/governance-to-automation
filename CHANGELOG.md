@@ -21,8 +21,8 @@ First stable release of the **governance-to-automation** skill.
 - First-class **detached runs** via `--tmux-session` / `--tmux-log`.
 - Reference blueprints: `auto-develop-template.md`, `prompt-builders.md`, `task-list-template.md`,
   `extraction-checklist.md`; and an `examples/` sample output.
-- **skills.sh packaging**: README, MIT `LICENSE`, GitHub topics, and single-skill delivery (the
-  vendored `prd-to-governance` copy is hidden from discovery via `metadata.internal`).
+- **skills.sh packaging**: README, MIT `LICENSE`, GitHub topics; ships a single skill
+  (`prd-to-governance` is a separate, companion skill with its own repo).
 
 ### Fixed
 - Review and no-op-detection diffs now include **new (untracked) files** (staged diff against base),

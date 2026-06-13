@@ -1,7 +1,0 @@
-interface:
-  display_name: "PRD to Governance"
-  short_description: "Generate governance files from a PRD and repo reality."
-  default_prompt: "Use $prd-to-governance to create or audit SOUL.md, AGENTS.md, CLAUDE.md, and MEMORY.md from this project's PRD."
-
-policy:
-  allow_implicit_invocation: true
