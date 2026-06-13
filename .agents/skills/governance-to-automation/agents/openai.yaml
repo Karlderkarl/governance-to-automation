@@ -1,0 +1,7 @@
+interface:
+  display_name: "Governance to Automation"
+  short_description: "Turn governance files into an automated delivery pipeline."
+  default_prompt: "Use $governance-to-automation to generate or sync an auto-develop pipeline from this project's governance files."
+
+policy:
+  allow_implicit_invocation: true

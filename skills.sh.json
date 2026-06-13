@@ -1,0 +1,14 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Governance",
+      "description": "Bootstrap project governance from a PRD and turn that governance into automation.",
+      "skills": [
+        "prd-to-governance",
+        "governance-to-automation"
+      ]
+    }
+  ]
+}
