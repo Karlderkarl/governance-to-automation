@@ -13,7 +13,7 @@ What to pull from each governance file to parameterize `auto-develop.sh`. Work t
 
 ## From AGENTS.md
 
-- [ ] **Roles** → `{{IMPL_MODEL}}`, `{{REVIEW_A}}`, `{{REVIEW_B}}`, and single-vs-dual review depth
+- [ ] **Roles** → implementation/reviewer role slots, any governance-suggested models or CLIs for those slots, and single-vs-dual review depth. Treat governance model names as defaults to confirm later, not as auto-binding output.
 - [ ] **Git conventions** → `{{BASE_BRANCH}}`, branch pattern (`issue-<n>-<slug>`), commit format, force-push/hook policy
 - [ ] **Prohibited actions** → the hard "do NOT" lines injected into every write-capable prompt + review focus
 - [ ] **Review rules** → reviewer focus split (A vs B), what counts as a blocking finding, read-only enforcement
@@ -25,10 +25,11 @@ What to pull from each governance file to parameterize `auto-develop.sh`. Work t
 
 - [ ] **Development Commands** → `{{CHECK_CMDS[]}}` in order; flag any `# planned` (not yet runnable → bootstrap first)
 - [ ] **Single-test command** → used by check-fix and local validation
-- [ ] **Tool preferences** → which CLIs the script uses (`gh`, package manager, `codex`)
+- [ ] **Tool preferences** → which CLIs/runners the script can use (`gh`, package manager, `claude`, `codex`, CI wrapper, etc.)
 - [ ] **Roles** → confirm they match AGENTS.md; mismatch = `[GOVERNANCE DRIFT]`
 - [ ] **Environment variables** → what the script must export or require; never hardcode secret values
 - [ ] **Review boundary** → must stay in sync with AGENTS.md review roles
+- [ ] **Operational guidance** → whether governance already implies detached execution expectations (`tmux`, runner host, CI, log paths)
 
 ## From MEMORY.md (the memory discipline — Critical)
 
@@ -48,16 +49,18 @@ What to pull from each governance file to parameterize `auto-develop.sh`. Work t
 - [ ] Commands referenced in prompts/checks actually exist in CLAUDE.md
 - [ ] Memory rules in the script match MEMORY.md *Update Rules* verbatim in intent
 - [ ] Base branch in the script matches AGENTS.md git conventions
+- [ ] GitHub-issue mode includes a concrete issue-seeding plan from the AGENTS.md phase plan, not just a label convention
 
 ## Output of this step
 
 A filled parameter set:
 
 ```
-IMPL_MODEL, REVIEW_A, REVIEW_B(+effort), BASE_BRANCH, TASK_SOURCE(+label/file),
-CHECK_CMDS[], TOOLCHAIN_SETUP, MEMORY_FILE, ARCHIVE_FILE, REFERENCE_DOCS,
-GOVERNANCE_REVIEW_FOCUS (8-15 bullets), PERMISSION_MODE/SANDBOX (user opt-in),
-MAX_ROUNDS, MERGE_POLICY
+ROLE_SLOTS, GOVERNANCE_MODEL_DEFAULTS, CONFIRMED_MODEL_SELECTIONS(+effort/+runner),
+BASE_BRANCH, TASK_SOURCE(+label/file), CHECK_CMDS[], TOOLCHAIN_SETUP, MEMORY_FILE,
+ARCHIVE_FILE, REFERENCE_DOCS, GOVERNANCE_REVIEW_FOCUS (8-15 bullets),
+PERMISSION_MODE/SANDBOX (user opt-in), MAX_ROUNDS, MERGE_POLICY,
+ISSUE_SEED_PLAN, DETACHED_RUN_MODE
 ```
 
 Carry this into Step 4 (generate the script) and Step 5 (supporting artifacts).

@@ -24,9 +24,11 @@ Options:
                          Reviewer A reasoning effort (default: high)
   --review-b <model>     Reviewer B model via Codex CLI (default: gpt-5.4)
   --review-b-effort <level>
-                         Reviewer B reasoning effort (default: high)
+                          Reviewer B reasoning effort (default: high)
   --max-rounds <n>       Max review-fix rounds per issue (default: 100)
   --dry-run              Show planned steps without executing
+  --tmux-session <name>  Launch the run in a detached tmux session, then exit
+  --tmux-log <path>      Log file for detached tmux runs
   -h, --help             Show this help text
 
 Model short names:
@@ -35,6 +37,11 @@ Model short names:
   haiku    → claude-haiku-4-5-20251001 (claude -p)
   codex    -> gpt-5.4              (codex exec)
   Full model IDs are also accepted for Claude models.
+
+Examples:
+  ./auto-develop.sh --max-issues 100
+  ./auto-develop.sh --issue 42 --dry-run
+  ./auto-develop.sh --max-issues 100 --tmux-session auto-develop
 EOF
 }
 
@@ -51,6 +58,9 @@ REVIEW_B_MODEL="gpt-5.4"
 REVIEW_B_EFFORT="high"
 MAX_ROUNDS=100
 DRY_RUN=false
+TMUX_SESSION=""
+TMUX_LOGFILE="logs/auto-develop.tmux.log"
+NO_TMUX_REEXEC=false
 
 LOGDIR="logs/issues"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -74,6 +84,9 @@ while [[ $# -gt 0 ]]; do
     --review-b-effort) REVIEW_B_EFFORT="$2"; shift 2 ;;
     --max-rounds)  MAX_ROUNDS="$2";      shift 2 ;;
     --dry-run)     DRY_RUN=true;         shift ;;
+    --tmux-session) TMUX_SESSION="$2";   shift 2 ;;
+    --tmux-log)    TMUX_LOGFILE="$2";    shift 2 ;;
+    --no-tmux-reexec) NO_TMUX_REEXEC=true; shift ;;
     -h|--help)     usage; exit 0 ;;
     *)             echo "Unknown option: $1"; usage; exit 1 ;;
   esac
@@ -91,6 +104,40 @@ die() {
   log "FATAL: $*" >&2
   exit 1
 }
+
+build_reexec_args() {
+  local -a args
+  args+=(--max-issues "$MAX_ISSUES")
+  [[ -n "$TARGET_ISSUE" ]] && args+=(--issue "$TARGET_ISSUE")
+  args+=(--model "$MODEL")
+  args+=(--review-a "$REVIEW_A_MODEL" --review-a-effort "$REVIEW_A_EFFORT")
+  args+=(--review-b "$REVIEW_B_MODEL" --review-b-effort "$REVIEW_B_EFFORT")
+  args+=(--max-rounds "$MAX_ROUNDS")
+  [[ "$DRY_RUN" == true ]] && args+=(--dry-run)
+  args+=(--no-tmux-reexec)
+  printf '%q ' "${args[@]}"
+}
+
+launch_in_tmux_if_requested() {
+  [[ -z "$TMUX_SESSION" ]] && return 0
+  [[ "$NO_TMUX_REEXEC" == true ]] && return 0
+  [[ -n "${TMUX:-}" ]] && {
+    log "Already inside tmux session '$TMUX_SESSION'; continuing in foreground."
+    return 0
+  }
+  command -v tmux >/dev/null 2>&1 || die "tmux is required for --tmux-session"
+  tmux has-session -t "$TMUX_SESSION" 2>/dev/null && die "tmux session '$TMUX_SESSION' already exists"
+  mkdir -p "$(dirname "$TMUX_LOGFILE")"
+  local reexec_args
+  reexec_args="$(build_reexec_args)"
+  tmux new-session -d -s "$TMUX_SESSION" "cd $(printf '%q' "$PWD") && $(printf '%q' "$0") $reexec_args | tee -a $(printf '%q' "$TMUX_LOGFILE")"
+  log "Detached tmux session '$TMUX_SESSION' started."
+  log "Reattach with: tmux attach -t $TMUX_SESSION"
+  log "Live log: $TMUX_LOGFILE"
+  exit 0
+}
+
+launch_in_tmux_if_requested
 
 # Map short model names to the IDs that `claude -p --model` expects.
 resolve_claude_model() {

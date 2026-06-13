@@ -14,7 +14,30 @@ Convention the generated script relies on:
 - **Lifecycle**: the script branches `issue-<n>-<slug>`, implements, reviews, commits, opens a PR with `Closes #<n>`, and (only if opted in) merges.
 - **Granularity**: one issue = one shippable unit, small enough for a meaningful single review.
 
-Seed issues from the AGENTS.md *Phase Plan*: one issue per phase sub-task, with `Depends on #N` encoding the order.
+**Seeding the backlog** — create one issue per phase sub-task from the AGENTS.md *Phase Plan*, with `Depends on #N` encoding the order. This is an outward-facing action: present the planned titles/bodies/dependencies and get explicit approval first, then run (per sub-task):
+
+```bash
+gh issue create \
+  --title "<phase sub-task title>" \
+  --label agent:auto \
+  --body $'<one-line goal>\n\nDepends on #<N>'   # omit the Depends line if none
+```
+
+Concrete example:
+
+```bash
+gh issue create \
+  --title "Phase 1 - foundation bootstrap" \
+  --label agent:auto \
+  --body $'Source: AGENTS.md Phase Plan\n\nGoal:\n- Bootstrap the repository foundation\n\nDepends on: none'
+
+gh issue create \
+  --title "Phase 2 - workflow automation" \
+  --label agent:auto \
+  --body $'Source: AGENTS.md Phase Plan\n\nGoal:\n- Add the automated workflow layer\n\nDepends on #1'
+```
+
+Because dependencies reference issue numbers that only exist after creation, seed in dependency order (roots first) and fill in each `Depends on #N` once the referenced issue number is known — or create the issues first, then `gh issue edit <n> --body` to add the `Depends on #N` lines. Capture the created numbers as you go.
 
 ## Option B — Local task-list file (default when there is no issue tracker)
 
@@ -72,3 +95,4 @@ For very small projects, the script can read the single top item from MEMORY.md 
 - Never wire two sources at once — pick A, B, or C with the user (`[USER DECISION REQUIRED]` if unclear).
 - Keep dependency semantics identical across sources: a blocked task is skipped, not failed.
 - The task source defines *what* to build; the governance defines *how*. Do not let the task file restate coding standards or security rules — those live in SOUL.md/AGENTS.md.
+- In GitHub-issue mode, "seed the backlog" means actual `gh issue create` commands, not just creating the label.

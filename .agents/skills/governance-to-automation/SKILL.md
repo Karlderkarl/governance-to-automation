@@ -21,8 +21,10 @@ For this skill, one project equals one folder. The project root is the folder th
 |---|---|
 | `auto-develop.sh` | The pipeline. Selects eligible tasks, runs implement/check/review/fix loop, commits, opens PR, updates memory. Parameterized to this project. |
 | Task source wiring | Either GitHub Issues (label + `Depends on #N` convention) **or** a local task-list file (`refact-todo.md` style). One source of truth, chosen with the user. |
+| Task source materialization | If GitHub Issues are chosen, seed them from the AGENTS.md phase plan; if local tasks are chosen, scaffold the task-list file. |
 | Prompt builders | The implementation/review/fix/memory-update prompts, with this project's SOUL/AGENTS rules injected and "read the governance first" baked in. |
 | Logs + ignore rules | `logs/issues/<n>/` layout and a `.gitignore` entry so pipeline logs never pollute commits or review diffs. |
+| Run mode guide | A short operator guide for foreground runs and detached `tmux` runs, including a copy-pasteable long-run command. |
 | Memory note | A single record in `MEMORY.md` that automation was generated, written per the governance's own update rules. |
 
 See `references/auto-develop-template.md` for the script blueprint, `references/prompt-builders.md` for the prompts, `references/task-list-template.md` for the local task-source format, and `references/extraction-checklist.md` for the governance→script mapping.
@@ -31,7 +33,7 @@ See `references/auto-develop-template.md` for the script blueprint, `references/
 
 The four governance files are authoritative inputs. This skill consumes them and may write **only `MEMORY.md`** plus the generated automation artifacts (script, task file, logs config).
 
-**Critical** — Do **not** edit `SOUL.md`, `AGENTS.md`, or `CLAUDE.md`. If generating the automation reveals one of them is wrong (a command does not exist, a declared model is unavailable), stop and route the fix through `prd-to-governance` in Audit mode. The generated script is downstream of the governance, never a place to silently override it.
+**Critical** — Do **not** edit `SOUL.md`, `AGENTS.md`, or `CLAUDE.md`. If generating the automation reveals one of them is wrong (a command does not exist, a declared model is unavailable, or the user-selected model plan differs from governance), stop and route the fix through `prd-to-governance` in Audit mode. The generated script is downstream of the governance, never a place to silently override it.
 
 ## Memory discipline is the core integration
 
@@ -84,7 +86,7 @@ Default selection:
 Read all four files completely and extract the values the script needs. Use `references/extraction-checklist.md` as the mapping. At minimum capture:
 
 - **Checks** (from CLAUDE.md *Development Commands*): the validation commands (type-check / lint / test / build, whatever the project uses), in order, verbatim. The script is stack-agnostic — these commands are the *only* source of the toolchain; do not assume Node, Python, or any specific runtime. Note any marked `# planned` — those are not runnable yet.
-- **Roles/models** (from AGENTS.md *Roles* + CLAUDE.md): implementation model, reviewer A, reviewer B (if dual review).
+- **Roles/models** (from AGENTS.md *Roles* + CLAUDE.md): implementation model, reviewer A, reviewer B (if dual review). Treat any model the governance names as a **suggested default only** — the actual per-step model choice is always confirmed with the user in Step 3, never auto-adopted from governance.
 - **Git conventions** (from AGENTS.md): base branch name, branch naming pattern, commit format, force-push/hook policy.
 - **Task source**: GitHub Issues + label, or a local task-list file, or MEMORY.md "Next Up".
 - **Memory paths + rules** (from MEMORY.md *Update Rules*): `MEMORY.md`, the archive path, the status-line and exclusion rules above.
@@ -107,26 +109,35 @@ Do not wire two sources at once. If unclear, ask `[USER DECISION REQUIRED]`.
 
 Present what you extracted, then confirm the choices that are strategic, not inferable. Keep it a short checklist:
 
-1. **Models**: implementation, reviewer A, reviewer B (+ reasoning effort). Default from governance; confirm availability.
+1. **Models** — **Required: always ask explicitly** (`[USER DECISION REQUIRED]`), even when the governance already declares roles. Never silently inherit the model from governance. Present every build step that runs a model and let the user **freely choose** one per step:
+   - **Implementation/fix model** — e.g. `opus`
+   - **Reviewer A** — e.g. `sonnet`
+   - **Reviewer B** (dual review only) — e.g. `codex` / `gpt-5.x`
+   - plus **reasoning effort** per reviewer (e.g. `high`).
+
+   Name these only as *examples* — any model or CLI the user names is valid; the choice is theirs. If governance already declares models, show them as the **pre-filled default** but still confirm. If the user's pick differs from what governance declares, flag `[GOVERNANCE DRIFT]` and route the correction through `prd-to-governance` (do not silently override the governance in the script).
 2. **Review depth**: single pass or dual (A/B)? Max review-fix rounds?
 3. **Commit/merge policy**: stop at PR for human review, or auto-merge? (Default: open PR, do **not** auto-merge unless the user opts in.)
 4. **Execution environment**: local CLI (`claude -p`, `codex exec`) vs CI; permission/sandbox level. **Critical** — `bypassPermissions`/`danger-full-access` require explicit user opt-in.
-5. **Scope guards**: max issues per run, dry-run default.
+5. **Run mode**: foreground shell only, or detached long-run support as well? Default: generate a `tmux`-friendly launch path and document a command such as `./auto-develop.sh --max-issues 100` plus the detached `tmux` equivalent.
+6. **Scope guards**: max issues per run, dry-run default.
 
 ### Step 4: Generate `auto-develop.sh`
 
 From `references/auto-develop-template.md`, produce the project's script:
 
-- Fill in checks, models, base branch, label/task-source, memory paths, reference docs, PATH/toolchain.
+- Fill in checks, the explicitly confirmed model/runner mapping, base branch, label/task-source, memory paths, reference docs, PATH/toolchain.
 - Build the prompt functions from `references/prompt-builders.md`, injecting the SOUL/AGENTS rules and always instructing agents to read `SOUL.md`/`AGENTS.md`/`MEMORY.md` first (single source of truth — do not duplicate large governance text into the script).
 - Wire every memory rule from the *Memory discipline* section above. This is the part most likely to be done wrong; verify each rule is present.
 - Keep the proven control flow: clean-worktree guard, dependency check, branch management, checks-with-autofix, review loop with no-op detection, memory-update step, commit/PR (and merge only if opted in).
 
 ### Step 5: Generate supporting artifacts
 
-- **Task source**: if local, scaffold the task-list file from `references/task-list-template.md`, seeded from the AGENTS.md phase plan. If GitHub Issues, emit the `gh label create` command and a short convention note (label + `Depends on #N`).
+- **Task source**: materialize the backlog from the AGENTS.md *Phase Plan* — one entry per phase sub-task — into the chosen source.
+  - **If local**: scaffold the task-list file from `references/task-list-template.md`, seeded from the phase plan.
+  - **If GitHub Issues**: emit the `gh label create` command, then **seed the issues** with a `gh issue create` per phase sub-task — each carrying the task label and a `Depends on #N` line encoding the phase order (see `references/task-list-template.md` Option A for the exact commands). **Creating issues is an outward-facing action**: present the planned issue titles/bodies/dependencies and get explicit approval before running any `gh issue create`; never create them silently. Keep a short convention note (label + `Depends on #N`) alongside.
 - **Logs + ignore**: ensure `logs/` is gitignored (and that `memory/completed-phases.md` is **not** accidentally ignored — use a precise pattern).
-- **Usage**: a brief run guide (the script's own `--help` plus the eligibility/dependency convention).
+- **Usage**: a brief run guide covering the script's own `--help`, the eligibility/dependency convention, direct runs such as `./auto-develop.sh --max-issues 100`, and detached `tmux` runs such as `tmux new-session -d -s auto-develop './auto-develop.sh --max-issues 100'`.
 
 ### Step 6: Validate
 
@@ -146,7 +157,7 @@ From `references/auto-develop-template.md`, produce the project's script:
 Do not rewrite blindly. Read the existing script, re-extract parameters from current governance, and report mismatches in four buckets, tagging significant ones `[GOVERNANCE DRIFT]`:
 
 - **Stale checks** — script runs commands that no longer exist in CLAUDE.md (or misses new ones)
-- **Role/model drift** — script models differ from AGENTS.md/CLAUDE.md roles
+- **Role/model drift** — script roles, runners, or model selections differ from AGENTS.md/CLAUDE.md expectations
 - **Memory-rule drift** — script no longer matches MEMORY.md update rules (diff exclusion, status-line, archive ownership, no-op detection)
 - **Convention drift** — base branch, label, commit format, or dependency handling diverged
 
@@ -156,7 +167,9 @@ Present findings, then update only the approved parts.
 
 - **Solo / small project?** Single review pass (or "user reviews"); drop Reviewer B from the script.
 - **No GitHub tracker?** Use the local task-list source; skip `gh` issue/PR steps and stop after commit on a branch.
+- **GitHub tracker?** Do not stop at label creation; materialize the backlog into actual issues from the AGENTS.md phase plan, with dependencies encoded in the body.
 - **No CI?** Generate a local-CLI script; do not assume a runner.
+- **Long unattended run?** Generate explicit `tmux` launch guidance or an in-script detached mode so the operator can safely run long batches such as `./auto-develop.sh --max-issues 100`.
 - **Any stack?** The script never assumes one. Whatever CLAUDE.md lists as validation commands (npm/pnpm, uv/poetry, cargo, go, make, gradle, or none) becomes the check list as-is; the toolchain-setup line carries only what governance specifies.
 - **Governance thin or missing?** Stop and route to `prd-to-governance`; never invent the contract here.
 - **Security-sensitive project?** Keep the SOUL.md prohibitions in the review prompt and require explicit opt-in for any bypass/sandbox flags.
@@ -167,8 +180,11 @@ Before presenting:
 
 - [ ] Mode stated (`Generate` / `Audit-Sync` / `Validate`)
 - [ ] All four governance files read; missing ones blocked the run with `[NEEDS GOVERNANCE]`
-- [ ] Checks, models, base branch, and task source were extracted from governance, not guessed
+- [ ] Checks, base branch, and task source were extracted from governance, not guessed
+- [ ] Models were **explicitly chosen by the user** per step (impl / reviewer A / reviewer B + effort), not silently inherited from governance; any divergence from governance flagged as `[GOVERNANCE DRIFT]`
 - [ ] Exactly one task source is wired
+- [ ] The backlog was **materialized** from the AGENTS.md Phase Plan into that source (task-list scaffolded, or issues seeded via `gh issue create` after explicit approval) — not merely documented as a convention
+- [ ] The generated usage covers detached long runs (`tmux` or equivalent) when the user asked for unattended execution
 - [ ] Every memory-discipline rule is present in the generated script (diff exclusion, single Next Up line, archive-only completed work, no-op detection, dependency blocking)
 - [ ] `SOUL.md`, `AGENTS.md`, `CLAUDE.md` were **not** edited; only `MEMORY.md` + automation artifacts changed
 - [ ] Prompts instruct agents to read the governance and do not duplicate large governance text
