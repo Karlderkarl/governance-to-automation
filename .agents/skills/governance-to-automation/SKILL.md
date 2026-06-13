@@ -1,6 +1,7 @@
 ---
 name: governance-to-automation
 description: "Generate (and keep in sync) the automation that executes a project's governance. From the governance files (SOUL.md, AGENTS.md, CLAUDE.md, MEMORY.md) this skill produces a project-tailored, stack-agnostic issue-driven auto-develop pipeline script plus its task source, prompt builders, and logging — wired to the exact memory-management discipline that prd-to-governance defines. Use after governance exists and the user wants the build loop automated."
+version: 1.0.0
 license: MIT
 ---
 
