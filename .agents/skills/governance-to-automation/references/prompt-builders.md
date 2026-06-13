@@ -89,9 +89,44 @@ You are fixing review findings for issue #<issue>.
 
 The overwrite-one-line rule is what enables no-op fix detection in the script. Keep it explicit.
 
-## 4. build_memory_update_prompt(issue, title, round, outfile)
+## 4. build_refactor_prompt(issue, title, body, round, outfile)
 
-This is the only step allowed to record completed work — and it writes to the archive, per the governance memory rules.
+The second pass. The code already passes review and all checks — this prompt asks for behavior-preserving simplification to senior-engineer quality, nothing more.
+
+```text
+You are refactoring the already-approved implementation of issue #<issue> for <PROJECT_NAME>.
+
+The code already passes review and all checks. Your ONLY job is to make it
+simpler and cleaner WITHOUT changing behavior.
+
+## Issue
+**#<issue>: <title>**
+<body>
+
+## Ask — go file by file over the change and ask:
+- Would a senior engineer have written it this way?
+- Can it be simpler — less duplication, clearer names, fewer moving parts, better
+  reuse of existing helpers/abstractions, more idiomatic for the language/stack?
+- Does it match the patterns and standards in SOUL.md / AGENTS.md?
+
+Apply ONLY behavior-preserving simplifications. Do NOT add features, change public
+behavior, or expand scope. If the code is already clean and a senior engineer would
+sign off as-is, make NO changes at all.
+
+## Instructions
+- Read SOUL.md (and AGENTS.md) for standards first. Do NOT modify SOUL.md or AGENTS.md.
+- Keep every existing check passing.
+- In MEMORY.md "Next Up", OVERWRITE the status line for this issue with:
+  `- #<issue>: refactor round <round>, simplifying: <brief or "no change needed">`
+- Do NOT append, and do NOT touch "Completed Work".
+- Save files. Do NOT commit.
+```
+
+**Making no change when the code is already clean is the contract** — that is what lets the script detect convergence (the `md5sum` of the code diff is unchanged) and stop the refactor loop. Keep the "make NO changes" instruction explicit, and keep the MEMORY.md line excluded from the no-op comparison (the script already excludes `{{MEMORY_FILE}}`).
+
+## 5. build_memory_update_prompt(issue, title, fix_rounds, refactor_rounds, outfile)
+
+This is the only step allowed to record completed work — and it writes to the archive, per the governance memory rules. The two count arguments are **distinct** and must not be conflated: `fix_rounds` is the correctness-pass review count (so `> 1` means at least one *fix* actually happened), and `refactor_rounds` is how many refactor rounds were *accepted* (`> 0` means the refactor pass changed code). A task can have several delivered review rounds purely from accepted refactor re-reviews **without** any "last fix" — keep the two gates separate so the archive line never implies a fix that did not occur.
 
 ```text
 Update memory for completed issue #<issue>.
@@ -100,7 +135,9 @@ Update memory for completed issue #<issue>.
 2. Remove any "Next Up" status line for #<issue> in MEMORY.md.
 3. Do NOT add issue detail to MEMORY.md — only update Next Up and blockers there.
 
-Format: `- <title> (#<issue>): <brief what was built>. Last fix: <final fix>` (include "Last fix" only if <round> > 1)
+Format: `- <title> (#<issue>): <brief what was built>[. Last fix: <final fix>][. Simplified in <refactor_rounds> refactor round(s)]`
+- Include "Last fix: …" ONLY if <fix_rounds> > 1 (a correctness fix actually happened).
+- Include "Simplified in …" ONLY if <refactor_rounds> > 0 (the refactor pass changed code).
 
 Rules:
 - 1-2 lines max. Don't document review cycles or reviewer names.
@@ -108,7 +145,7 @@ Rules:
 - MEMORY.md stays lean — see its Update Rules.
 ```
 
-## 5. build_check_fix_prompt(issue, check_output, outfile)
+## 6. build_check_fix_prompt(issue, check_output, outfile)
 
 ```text
 The implementation for issue #<issue> has failing checks. Fix them.

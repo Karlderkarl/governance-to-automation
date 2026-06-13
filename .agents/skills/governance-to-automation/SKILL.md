@@ -9,7 +9,7 @@ license: MIT
 This skill **generates the automation** that runs a project end to end. It is the execution counterpart to `prd-to-governance`:
 
 - `prd-to-governance` is the **blueprint for splitting the project into files** (`SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`) and it defines **how and where memory is managed** (what goes into `MEMORY.md` vs `memory/completed-phases.md`, the status-line discipline, drift handling).
-- `governance-to-automation` reads that governance and **emits the runnable pipeline** — primarily an `auto-develop.sh` script that processes tasks autonomously: implement → check → review → fix → commit → PR. The script *embodies* the memory rules the governance prescribes.
+- `governance-to-automation` reads that governance and **emits the runnable pipeline** — primarily an `auto-develop.sh` script that processes tasks autonomously: implement → check → review → fix → refactor → re-review → commit → PR. The script *embodies* the memory rules the governance prescribes.
 
 The skill does **not** itself implement features. It writes the machinery that does, configured to one specific project's contract.
 
@@ -19,7 +19,7 @@ For this skill, one project equals one folder. The project root is the folder th
 
 | Artifact | Purpose |
 |---|---|
-| `auto-develop.sh` | The pipeline. Selects eligible tasks, runs implement/check/review/fix loop, commits, opens PR, updates memory. Parameterized to this project. |
+| `auto-develop.sh` | The pipeline. Selects eligible tasks, runs implement/check/review/fix loop, then a senior-quality refactor pass re-validated by the reviewers, commits, opens PR, updates memory. Parameterized to this project. |
 | Task source wiring | Either GitHub Issues (label + `Depends on #N` convention) **or** a local task-list file (`refact-todo.md` style). One source of truth, chosen with the user. |
 | Task source materialization | If GitHub Issues are chosen, seed them from the AGENTS.md phase plan; if local tasks are chosen, scaffold the task-list file. |
 | Prompt builders | The implementation/review/fix/memory-update prompts, with this project's SOUL/AGENTS rules injected and "read the governance first" baked in. |
@@ -46,6 +46,15 @@ The four governance files are authoritative inputs. This skill consumes them and
 - **Dependency blocking** — `Depends on #N` (or the task-list equivalent) hard-blocks a task until its dependencies are done.
 
 If the governance does not yet specify these, that is `[NEEDS GOVERNANCE]` — route back to `prd-to-governance` rather than inventing the policy here.
+
+## Two-pass pipeline: correctness, then refactor
+
+Each task runs through **two** review-backed passes:
+
+1. **Correctness pass** — implement → check → reviewers A/B → fix → re-review, looping until both reviewers pass (with no-op fix detection to break the loop).
+2. **Refactor pass** — once correctness is approved, that state is **committed as a checkpoint**, then a second loop asks the implementation model to **simplify the code to senior-engineer quality without changing behavior** ("could this be simpler — would a senior engineer have written it this way?"). Any change it makes is **re-validated by reviewers A/B** (the same review loop). A refactor round is **kept only if its re-review comes back clean**; if reviewers object — including the case where the follow-up fix changes nothing — that round is **reverted to the checkpoint** and refactoring stops. The loop also stops once a round proposes **no change** (converged) or `MAX_REFACTOR_ROUNDS` is hit.
+
+**Required** — The refactor pass is behavior-preserving cleanup only; it must never add features or change public behavior, and it reuses the exact same A/B review + memory discipline as the correctness pass. It runs **only after** correctness passes (which is committed first), and the user can disable it (`--no-refactor`). Two invariants make the second pass safe: (a) a not-cleanly-approved refactor **reverts to the checkpoint**, so it can never silently keep a degraded simplification and never discards the already-approved correctness work; (b) the recorded metadata reflects the real final history, since `MEMORY.md` is part of the governance contract — the commit message reports the **delivered** A/B rounds (correctness plus accepted refactor re-reviews, not discarded attempts), and the archive records correctness fixes and accepted refactor rounds as **distinct** facts (so it never implies a "last fix" that did not happen). Both passes share one `review_until_pass` implementation (which signals `clean` vs a tolerated no-op) so the review/no-op logic is never duplicated.
 
 ## Uncertainty and priority markers
 
@@ -116,7 +125,7 @@ Present what you extracted, then confirm the choices that are strategic, not inf
    - plus **reasoning effort** per reviewer (e.g. `high`).
 
    Name these only as *examples* — any model or CLI the user names is valid; the choice is theirs. If governance already declares models, show them as the **pre-filled default** but still confirm. If the user's pick differs from what governance declares, flag `[GOVERNANCE DRIFT]` and route the correction through `prd-to-governance` (do not silently override the governance in the script).
-2. **Review depth**: single pass or dual (A/B)? Max review-fix rounds?
+2. **Review & refactor depth**: single review pass or dual (A/B)? Max review-fix rounds? **Refactor pass** — after the correctness review passes, run a simplification pass ("could this be simpler — would a senior engineer have written it this way?") that is re-validated by reviewers A/B? (Default: **on**.) Max refactor rounds (default 3)?
 3. **Commit/merge policy**: stop at PR for human review, or auto-merge? (Default: open PR, do **not** auto-merge unless the user opts in.)
 4. **Execution environment**: local CLI (`claude -p`, `codex exec`) vs CI; permission/sandbox level. **Critical** — `bypassPermissions`/`danger-full-access` require explicit user opt-in.
 5. **Run mode**: foreground shell only, or detached long-run support as well? Default: generate a `tmux`-friendly launch path and document a command such as `./auto-develop.sh --max-issues 100` plus the detached `tmux` equivalent.
@@ -129,7 +138,8 @@ From `references/auto-develop-template.md`, produce the project's script:
 - Fill in checks, the explicitly confirmed model/runner mapping, base branch, label/task-source, memory paths, reference docs, PATH/toolchain.
 - Build the prompt functions from `references/prompt-builders.md`, injecting the SOUL/AGENTS rules and always instructing agents to read `SOUL.md`/`AGENTS.md`/`MEMORY.md` first (single source of truth — do not duplicate large governance text into the script).
 - Wire every memory rule from the *Memory discipline* section above. This is the part most likely to be done wrong; verify each rule is present.
-- Keep the proven control flow: clean-worktree guard, dependency check, branch management, checks-with-autofix, review loop with no-op detection, memory-update step, commit/PR (and merge only if opted in).
+- Keep the proven control flow: clean-worktree guard, dependency check, branch management, checks-with-autofix, correctness review loop with no-op detection, refactor stage (simplify → re-check → re-review) with no-op/round guards, memory-update step, commit/PR (and merge only if opted in).
+- Factor the A/B review + fix loop into one `review_until_pass` function reused by both the correctness pass and the refactor re-validation; gate the refactor stage on `REFACTOR`/`--no-refactor` and bound it with `MAX_REFACTOR_ROUNDS`. Add `build_refactor_prompt` from `references/prompt-builders.md` — behavior-preserving simplification only, with the "make no change if already clean" instruction that drives convergence.
 
 ### Step 5: Generate supporting artifacts
 
@@ -170,6 +180,7 @@ Present findings, then update only the approved parts.
 - **GitHub tracker?** Do not stop at label creation; materialize the backlog into actual issues from the AGENTS.md phase plan, with dependencies encoded in the body.
 - **No CI?** Generate a local-CLI script; do not assume a runner.
 - **Long unattended run?** Generate explicit `tmux` launch guidance or an in-script detached mode so the operator can safely run long batches such as `./auto-develop.sh --max-issues 100`.
+- **Refactor pass not wanted?** It is on by default; generate the `--no-refactor` flag (and `--max-refactor-rounds`) so the operator can skip or bound the simplification pass. For cost-sensitive or trivial-change projects, defaulting it off is a valid choice — confirm in Step 3.
 - **Any stack?** The script never assumes one. Whatever CLAUDE.md lists as validation commands (npm/pnpm, uv/poetry, cargo, go, make, gradle, or none) becomes the check list as-is; the toolchain-setup line carries only what governance specifies.
 - **Governance thin or missing?** Stop and route to `prd-to-governance`; never invent the contract here.
 - **Security-sensitive project?** Keep the SOUL.md prohibitions in the review prompt and require explicit opt-in for any bypass/sandbox flags.
@@ -186,6 +197,8 @@ Before presenting:
 - [ ] The backlog was **materialized** from the AGENTS.md Phase Plan into that source (task-list scaffolded, or issues seeded via `gh issue create` after explicit approval) — not merely documented as a convention
 - [ ] The generated usage covers detached long runs (`tmux` or equivalent) when the user asked for unattended execution
 - [ ] Every memory-discipline rule is present in the generated script (diff exclusion, single Next Up line, archive-only completed work, no-op detection, dependency blocking)
+- [ ] The refactor pass (unless `--no-refactor`) runs only after the correctness state is committed as a checkpoint, re-validates through A/B via the shared `review_until_pass`, **keeps a round only on a clean re-review** (reverts to the checkpoint otherwise — degraded refactors are never kept and correctness work is never lost), is behavior-preserving only, and is bounded by no-op detection + `MAX_REFACTOR_ROUNDS`
+- [ ] Metadata reflects the real history, not a pre-refactor snapshot: commit reports the delivered A/B rounds (correctness plus accepted refactor re-reviews, not discarded refactor attempts), and the memory archive gates "last fix" on correctness fix rounds and the simplification note on `REFACTOR_ROUNDS` (the two are not conflated)
 - [ ] `SOUL.md`, `AGENTS.md`, `CLAUDE.md` were **not** edited; only `MEMORY.md` + automation artifacts changed
 - [ ] Prompts instruct agents to read the governance and do not duplicate large governance text
 - [ ] Privileged/sandbox flags (`bypassPermissions`, `danger-full-access`, auto-merge) were used only with explicit user opt-in

@@ -8,6 +8,12 @@
 #  project. It is kept only as a concrete fixture showing what fully-resolved
 #  skill output looks like (real runner functions, model resolution, etc.).
 #
+#  NOTE: this is a pre-refactor-pass snapshot. The skill has since gained a
+#  second, refactor pass (review_until_pass + refactor_stage, --no-refactor /
+#  --max-refactor-rounds). This fixture is intentionally NOT re-synced; for the
+#  current pipeline shape see
+#  .agents/skills/governance-to-automation/references/auto-develop-template.md.
+#
 #  It is project-specific and carries privileged defaults that were that
 #  project's EXPLICIT opt-in — they are NOT the skill's defaults:
 #    - CLAUDE_PERMISSION_MODE="bypassPermissions"
