@@ -1,19 +1,28 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository is currently in bootstrap state. At the moment, the only tracked project artifact is `.claude/settings.local.json`, which contains local tooling permissions. No `src/`, `tests/`, `public/`, or `scripts/` directories exist yet. When adding implementation code, keep the root clean and introduce a predictable layout such as `src/` for application code, `tests/` for automated checks, and `docs/` for supporting documentation.
+This is a Claude Code **skill-authoring** repository, not an application. Its content is a suite of skills that implement a two-stage **governance → automation** pipeline for *other* projects:
+- `.agents/skills/prd-to-governance/` — **vendored** from GitHub (`Karlderkarl/prd-to-governance`, tracked by `skills-lock.json` with a content hash). Generates the four governance files (`SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`). Prefer sending fixes upstream over editing the vendored copy in place.
+- `.agents/skills/governance-to-automation/` — **locally authored**. Reads governance and generates a project-tailored, stack-agnostic `auto-develop.sh`.
+
+Each skill is a `SKILL.md` (YAML frontmatter + workflow) plus a `references/` folder of on-demand blueprints. The root `auto-develop.sh` and `refact-todo.md` are **example outputs** (generated for a Node/pnpm + Payload CMS project), not this repository's own build system. `CLAUDE.md` holds the detailed architecture and the contract between the two skills — read it first.
 
 ## Build, Test, and Development Commands
-No build, test, lint, or local-run commands are configured yet. Before adding features, define project scripts in the relevant build file and keep them documented here. For current repository inspection, use `Get-ChildItem -Force` to view the workspace and `rg --files -uu` to list all files, including hidden ones.
+There is no application toolchain (Markdown + one example Bash script). The meaningful checks:
+- `bash -n auto-develop.sh` — syntax-check the example/generated pipeline script
+- `shellcheck auto-develop.sh` — lint the script, if available
+- `rg --files -uu` — list all files incl. hidden (skill inventory)
+
+When `governance-to-automation` generates a script, validate it the same way (`bash -n`, `shellcheck`, then `--dry-run`) before running. Generation must never execute the real loop.
 
 ## Coding Style & Naming Conventions
-Match the style of the files you touch. Since the repo currently contains only JSON and Markdown, use consistent formatting with concise comments and descriptive names. Prefer lowercase, hyphenated Markdown filenames such as `contributor-guide.md`, and keep configuration files readable with stable key ordering where possible.
+Match the style of the files you touch. Skills share a vocabulary: uncertainty markers (`[NEEDS GOVERNANCE]`, `[NEEDS PRD CLARIFICATION]`, `[NEEDS CODEBASE DISCOVERY]`, `[USER DECISION REQUIRED]`, `[GOVERNANCE DRIFT]`), priority levels (**Critical** / **Required** / **Advisory**), "link, don't duplicate" (read governance, never copy large text), and stack-agnostic generation (never assume a toolchain). Prefer lowercase-hyphenated Markdown filenames such as `task-list-template.md`.
 
 ## Testing Guidelines
-There is no test framework configured yet. Add tests alongside the first real code contribution and place them in a dedicated `tests/` directory or next to the modules they verify. Name test files after the unit under test, for example `auth.test.ts` or `api_client_test.py`, and document the test command in this guide once introduced.
+No test framework. Validate changes by syntax- and lint-checking scripts and dry-running generated pipelines. When changing either skill, keep the governance ↔ automation **memory-discipline invariants** aligned on both sides (diff exclusion of `MEMORY.md`, single overwritten "Next Up" line, archive-only completed work, no-op fix detection, `Depends on #N` blocking) — see `CLAUDE.md`.
 
 ## Commit & Pull Request Guidelines
-This workspace is not currently initialized as a Git repository, so there is no commit history to infer conventions from. Use Conventional Commit prefixes such as `feat:`, `fix:`, `docs:`, and `chore:` once Git is enabled. Pull requests should include a short purpose statement, a summary of changed files, setup or verification notes, and screenshots only when UI work is added later.
+Use Conventional Commit prefixes (`feat:`, `fix:`, `docs:`, `chore:`). Keep commits scoped to one concern. Pull requests should state the purpose, summarize the changed files, and note verification (`bash -n` / `shellcheck` / `--dry-run`).
 
 ## Security & Configuration Tips
-Treat `.claude/settings.local.json` as local tooling configuration, not application logic. Do not commit secrets, tokens, or machine-specific credentials. Keep environment-specific values in untracked local files once runtime configuration is introduced.
+`.gitignore` excludes `.claude/settings.local.json` (local tooling config — never commit secrets, tokens, or machine-specific credentials). Privileged flags in generated scripts (`bypassPermissions`, `danger-full-access`, auto-merge) are **off by default** and require explicit user opt-in. The automation pipeline may write only `MEMORY.md` plus generated artifacts; `SOUL.md`/`AGENTS.md`/`CLAUDE.md` are never edited by it — corrections route back through `prd-to-governance`.

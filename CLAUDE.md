@@ -55,5 +55,5 @@ When `governance-to-automation` generates a script, validate it the same way (`b
 
 ## Caveats
 
-- The root **`AGENTS.md` is generic boilerplate and out of date** — it describes the repo as empty (only `.claude/settings.local.json`). It is *not* a governance file produced by `prd-to-governance`; do not rely on it for the current structure. There is currently no `SOUL.md` or `MEMORY.md` in this repo, so do not add `@SOUL.md`/`@MEMORY.md` references that point at nonexistent files.
-- `.gitignore` excludes `.claude/settings.local.json`. The repo is not yet a Git repository.
+- The root **`AGENTS.md`** describes this repo's own contributor guidelines (structure, checks, conventions). It is *not* a governance file produced by `prd-to-governance` — do not treat it as pipeline input. There is currently no `SOUL.md` or `MEMORY.md` in this repo, so do not add `@SOUL.md`/`@MEMORY.md` references that point at nonexistent files.
+- `.gitignore` excludes `.claude/settings.local.json`.
