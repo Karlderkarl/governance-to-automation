@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "prd-to-governance": {
+      "source": "Karlderkarl/prd-to-governance",
+      "sourceType": "github",
+      "skillPath": "prd-to-governance/SKILL.md",
+      "computedHash": "3f09b3d76bd6c24fd1cc756275be2d99aa05a8c41724da8c005e6bdf300f4ab9"
+    }
+  }
+}
