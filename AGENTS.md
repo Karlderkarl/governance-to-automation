@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 This is a Claude Code **skill-authoring** repository, not an application. Its content is a suite of skills that implement a two-stage **governance → automation** pipeline for *other* projects:
-- `.agents/skills/prd-to-governance/` — **vendored** from GitHub (`Karlderkarl/prd-to-governance`, tracked by `skills-lock.json` with a content hash). Generates the four governance files (`SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`). Prefer sending fixes upstream over editing the vendored copy in place.
+- `.agents/skills/prd-to-governance/` — **vendored** from GitHub (`Karlderkarl/prd-to-governance`, tracked by `skills-lock.json` with a content hash). Generates the four governance files (`SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`). Prefer sending fixes upstream over editing the vendored copy in place. One deliberate local exception: its frontmatter sets `metadata.internal: true` so `skills.sh` ships only `governance-to-automation` from this repo; re-apply that flag after any re-vendor (the lock hash still tracks upstream and will flag it).
 - `.agents/skills/governance-to-automation/` — **locally authored**. Reads governance and generates a project-tailored, stack-agnostic `auto-develop.sh`.
 
 Each skill is a `SKILL.md` (YAML frontmatter + workflow) plus a `references/` folder of on-demand blueprints. The `examples/` folder holds **sample outputs** (`auto-develop.payload-sample.sh`, `refact-todo.md`) generated for a Node/pnpm + Payload CMS project — read-only fixtures, not this repository's own build system, and the sample script must not be run here (it carries that project's opt-in privileged defaults). `CLAUDE.md` holds the detailed architecture and the contract between the two skills — read it first.

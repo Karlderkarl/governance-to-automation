@@ -11,7 +11,7 @@ Idea/PRD ─▶ prd-to-governance ─▶ SOUL.md / AGENTS.md / CLAUDE.md / MEMOR
             (what & how to build)        (the governance contract)              (generates the build loop)     (runs autonomously)
 ```
 
-- **`.agents/skills/prd-to-governance/`** — turns a PRD + repo reality into the four governance files; defines **how and where memory is managed** (`MEMORY.md` vs `memory/completed-phases.md`, status-line discipline, drift markers). **Vendored** from GitHub `Karlderkarl/prd-to-governance` and tracked by `skills-lock.json` (with a content hash) — prefer sending fixes upstream rather than editing the vendored copy in place.
+- **`.agents/skills/prd-to-governance/`** — turns a PRD + repo reality into the four governance files; defines **how and where memory is managed** (`MEMORY.md` vs `memory/completed-phases.md`, status-line discipline, drift markers). **Vendored** from GitHub `Karlderkarl/prd-to-governance` and tracked by `skills-lock.json` (with a content hash) — prefer sending fixes upstream rather than editing the vendored copy in place. **One deliberate local exception:** its frontmatter carries `metadata.internal: true` so `skills.sh` does not re-publish prd-to-governance from this repo (this repo ships only `governance-to-automation`). The `skills-lock.json` hash still tracks upstream, so re-vendoring will correctly flag this one-line change — re-apply `metadata.internal: true` after any re-vendor.
 - **`.agents/skills/governance-to-automation/`** — **locally authored**. Reads the governance files and *generates* a project-tailored `auto-develop.sh` (plus task source, prompt builders, logging). It does **not** implement features; it writes the machinery that does.
 
 ## The contract between the two skills (most important architecture)
