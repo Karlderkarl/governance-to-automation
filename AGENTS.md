@@ -5,12 +5,12 @@ This is a Claude Code **skill-authoring** repository, not an application. Its co
 - `.agents/skills/prd-to-governance/` — **vendored** from GitHub (`Karlderkarl/prd-to-governance`, tracked by `skills-lock.json` with a content hash). Generates the four governance files (`SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `MEMORY.md`). Prefer sending fixes upstream over editing the vendored copy in place.
 - `.agents/skills/governance-to-automation/` — **locally authored**. Reads governance and generates a project-tailored, stack-agnostic `auto-develop.sh`.
 
-Each skill is a `SKILL.md` (YAML frontmatter + workflow) plus a `references/` folder of on-demand blueprints. The root `auto-develop.sh` and `refact-todo.md` are **example outputs** (generated for a Node/pnpm + Payload CMS project), not this repository's own build system. `CLAUDE.md` holds the detailed architecture and the contract between the two skills — read it first.
+Each skill is a `SKILL.md` (YAML frontmatter + workflow) plus a `references/` folder of on-demand blueprints. The `examples/` folder holds **sample outputs** (`auto-develop.payload-sample.sh`, `refact-todo.md`) generated for a Node/pnpm + Payload CMS project — read-only fixtures, not this repository's own build system, and the sample script must not be run here (it carries that project's opt-in privileged defaults). `CLAUDE.md` holds the detailed architecture and the contract between the two skills — read it first.
 
 ## Build, Test, and Development Commands
 There is no application toolchain (Markdown + one example Bash script). The meaningful checks:
-- `bash -n auto-develop.sh` — syntax-check the example/generated pipeline script
-- `shellcheck auto-develop.sh` — lint the script, if available
+- `bash -n examples/auto-develop.payload-sample.sh` — syntax-check the example pipeline script
+- `shellcheck examples/auto-develop.payload-sample.sh` — lint the script, if available
 - `rg --files -uu` — list all files incl. hidden (skill inventory)
 
 When `governance-to-automation` generates a script, validate it the same way (`bash -n`, `shellcheck`, then `--dry-run`) before running. Generation must never execute the real loop.

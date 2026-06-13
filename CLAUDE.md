@@ -39,16 +39,16 @@ Each skill is a directory with `SKILL.md` (YAML frontmatter `name` + `descriptio
 
 ## Reference artifacts at the repo root
 
-`auto-develop.sh` and `refact-todo.md` at the root are **example outputs**, not this repository's own build system. They were generated for a Node/pnpm + Payload CMS project and are kept as the concrete model that `governance-to-automation`'s template generalizes. Do **not** treat their `pnpm type-check/lint/build` commands or Payload-specific rules as applicable to this repo. (`refact-todo.md` also illustrates the local task-list task source.)
+`examples/auto-develop.payload-sample.sh` and `examples/refact-todo.md` are **example outputs**, not this repository's own build system. They were generated for a Node/pnpm + Payload CMS project and are kept under `examples/` as the concrete model that `governance-to-automation`'s template generalizes. Do **not** treat their `pnpm type-check/lint/build` commands or Payload-specific rules as applicable to this repo, and do **not** run the sample script here — it carries that project's opt-in privileged defaults (`bypassPermissions`, `danger-full-access`, unconditional auto-merge) which the skill itself ships **off** by default. (`examples/refact-todo.md` also illustrates the local task-list task source, in the Option B schema.)
 
 ## Commands
 
 This repo has no build/lint/test toolchain (it is Markdown + one example bash script). The only meaningful checks:
 
 ```bash
-bash -n auto-develop.sh        # syntax-check the example/generated pipeline script
-shellcheck auto-develop.sh     # lint the script, if shellcheck is available
-rg --files -uu                 # list all files incl. hidden (skill inventory)
+bash -n examples/auto-develop.payload-sample.sh    # syntax-check the example pipeline script
+shellcheck examples/auto-develop.payload-sample.sh # lint the script, if shellcheck is available
+rg --files -uu                                     # list all files incl. hidden (skill inventory)
 ```
 
 When `governance-to-automation` generates a script, validate it the same way (`bash -n`, `shellcheck`, then `--dry-run`) before it is run — generation must never execute the real loop.

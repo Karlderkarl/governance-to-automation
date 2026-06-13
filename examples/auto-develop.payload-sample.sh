@@ -1,4 +1,26 @@
 #!/usr/bin/env bash
+#
+# ============================================================================
+#  EXAMPLE / SAMPLE OUTPUT — NOT THIS REPOSITORY'S AUTOMATION. DO NOT RUN HERE.
+# ============================================================================
+#  This is a *generated* auto-develop.sh, produced by the
+#  `governance-to-automation` skill for a specific Node/pnpm + Payload CMS
+#  project. It is kept only as a concrete fixture showing what fully-resolved
+#  skill output looks like (real runner functions, model resolution, etc.).
+#
+#  It is project-specific and carries privileged defaults that were that
+#  project's EXPLICIT opt-in — they are NOT the skill's defaults:
+#    - CLAUDE_PERMISSION_MODE="bypassPermissions"
+#    - Reviewer B runs with `danger-full-access`
+#    - unconditional `gh pr merge --squash` (auto-merge)
+#    - hardcoded `master` base branch and pnpm PATH
+#  The skill itself ships these OFF by default and gates them behind explicit
+#  user opt-in (see ../CLAUDE.md and the template at
+#  .agents/skills/governance-to-automation/references/auto-develop-template.md).
+#
+#  Treat this file as read-only reference. Do not execute it in this repo.
+# ============================================================================
+
 set -euo pipefail
 
 # Issue-driven development loop for Claude Code.
