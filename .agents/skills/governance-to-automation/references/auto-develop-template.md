@@ -16,8 +16,9 @@ Structural blueprint for the generated pipeline. It is a proven issue-driven loo
 | `{{REFERENCE_DOCS}}` | SOUL.md *Reference Documents* | `setup-guide.md` |
 | `{{GOVERNANCE_REVIEW_FOCUS}}` | SOUL.md + AGENTS.md (see prompt-builders.md) | concise security/coding rule list |
 | `{{PERMISSION_MODE}}` / `{{SANDBOX}}` | Step 3 user opt-in | `bypassPermissions` / `danger-full-access` |
+| `{{SKILL_MAP[]}}` | AGENTS.md *Skill Policy* + user-approved local entries (explicit matchers → skill) | `label:area:auth=security-hardening` — empty array only if both absent |
 
-For the **local task-list** source (no GitHub Issues), replace the `gh`-based candidate selection and PR/merge phases with: read the next unchecked task from the task-list file, branch, implement, check, review, commit, mark the task done. See `task-list-template.md`. Keep `--dry-run` **read-only** in this variant too: select/print the next task but do **not** flip its status or write the task file — a dirtied task file would trip the next run's clean-worktree guard.
+For the **local task-list** source (no GitHub Issues), replace the `gh`-based candidate selection and PR/merge phases with: read the next unchecked task from the task-list file, branch, implement, check, review, commit, mark the task done. See `task-list-template.md`. Keep `--dry-run` **read-only** in this variant too: select/print the next task but do **not** flip its status or write the task file — a dirtied task file would trip the next run's clean-worktree guard. Skill resolution still runs once per task, but a task-list task has no labels — so only `title:` matchers (against the task title/body) can resolve a skill in this variant; call `resolve_skill` with an empty label string.
 
 ## Skeleton
 
@@ -89,6 +90,21 @@ MEMORY_FILE="{{MEMORY_FILE}}"
 ARCHIVE_FILE="{{ARCHIVE_FILE}}"
 CLAUDE_PERMISSION_MODE="{{PERMISSION_MODE}}"   # requires explicit user opt-in
 
+# Skill resolution: explicit matchers -> skill, seeded from AGENTS.md "Skill Policy".
+# Each entry is "<type>:<pattern>=<skill>" (whitespace around ':' and '=' is
+# tolerated, so the spaced "<type>:<pattern> = <skill>" form the extraction
+# checklist documents parses identically):
+#   label:<issue-label>   match a task label  (most explicit; GitHub-issue source)
+#   title:<ere>           match the task title/body (extended regex)
+# Determinism rules (see resolve_skill): 0 distinct matches -> "(none)";
+# exactly 1 distinct -> chosen; >1 distinct -> "(ambiguous)" and NOTHING is injected.
+# No registry, no network, no semantic guessing. Empty array is a valid no-op default;
+# an operator may also author entries locally (e.g. from a skill's own tags/triggers).
+SKILL_MAP=(
+  {{FOR each entry in SKILL_MAP}} "{{entry}}"   # e.g. "label:area:auth=security-hardening"
+  {{END}}
+)
+
 # Validation commands, taken verbatim from CLAUDE.md (stack-agnostic — no assumption
 # about Node/Python/etc). Each runs in order; any non-zero exit fails the check phase.
 CHECKS=(
@@ -123,6 +139,8 @@ done
 
 log()  { echo "[auto-develop $(date +%H:%M:%S)] $*"; }
 die()  { log "FATAL: $*" >&2; exit 1; }
+# Strip leading/trailing whitespace (used to parse SKILL_MAP tolerantly).
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
 
 build_reexec_args() {
   local -a args
@@ -229,6 +247,60 @@ ensure_checks_pass() {  # <issue> <logdir> <prefix>
 # --- Prompt builders: see prompt-builders.md (write to temp files) ---
 # build_implementation_prompt / build_review_prompt / build_fix_prompt
 # / build_refactor_prompt / build_memory_update_prompt / build_check_fix_prompt
+# build_implementation_prompt, build_fix_prompt and build_refactor_prompt read the
+# globals RESOLVED_SKILL / RESOLVED_SKILL_REASON set by resolve_skill (below) and
+# inject a "Designated skill" block ONLY when RESOLVED_SKILL is a real skill. The
+# review, check-fix and memory prompts stay skill-neutral.
+
+# --- Deterministic skill resolution (see SKILL.md "Deterministic skill resolution").
+#     Resolve ONCE per task from SKILL_MAP, log searched/candidates/chosen/reason,
+#     and let only the implement/fix/refactor prompts inject the result. Outcomes:
+#       (none)       no matcher matched (or SKILL_MAP empty) -> nothing injected
+#       <skill>      exactly one DISTINCT skill matched      -> injected
+#       (ambiguous)  >1 distinct skills matched              -> nothing injected, logged
+#     No registry, no network, no semantic fallback: ambiguity is preferred over guessing.
+#     Resolution runs before implementation, so it never depends on post-impl changes. ---
+# <labels> is a NEWLINE-separated list (a single label may contain spaces, e.g.
+# "good first issue" or "area: auth"). Matchers are trimmed, so spaced policy entries work.
+# Only label: and title: matchers exist — both resolve deterministically without touching
+# the filesystem. (A path: matcher was intentionally dropped: it was a no-op in GitHub-issue
+# mode and filesystem-dependent in task-list mode. Reintroduce only with an explicit design.)
+resolve_skill() {  # <labels> <title> <body> <logdir>
+  local labels="$1" title="$2" body="$3" logdir="$4"
+  local text="$title"$'\n'"$body"
+  local -a reasons=() distinct=()
+  local entry lhs type pat skill matched l d seen
+  for entry in "${SKILL_MAP[@]}"; do
+    [[ "$entry" == *=* ]] || continue
+    skill="$(trim "${entry##*=}")"; lhs="${entry%=*}"
+    type="$(trim "${lhs%%:*}")"; pat="$(trim "${lhs#*:}")"
+    matched=false
+    case "$type" in
+      # Match each label as a WHOLE line; never word-split (would break labels with
+      # spaces and could false-match a fragment of a multi-word label).
+      label) while IFS= read -r l; do [[ -n "$l" && "$l" == "$pat" ]] && matched=true; done <<< "$labels" ;;
+      title) [[ "$text" =~ $pat ]] && matched=true ;;
+      *)     log "WARN: unknown SKILL_MAP matcher type '$type' in '$entry'" ;;
+    esac
+    [[ "$matched" == true ]] || continue
+    reasons+=("$type:$pat -> $skill")
+    seen=false; for d in "${distinct[@]}"; do [[ "$d" == "$skill" ]] && seen=true; done
+    [[ "$seen" == false ]] && distinct+=("$skill")
+  done
+  if [[ ${#distinct[@]} -eq 0 ]]; then
+    RESOLVED_SKILL="(none)"; RESOLVED_SKILL_REASON="no matcher matched"
+  elif [[ ${#distinct[@]} -eq 1 ]]; then
+    RESOLVED_SKILL="${distinct[0]}"; RESOLVED_SKILL_REASON="$(IFS='; '; echo "${reasons[*]}")"
+  else
+    RESOLVED_SKILL="(ambiguous)"; RESOLVED_SKILL_REASON="multiple distinct skills: $(IFS=', '; echo "${distinct[*]}")"
+  fi
+  {
+    echo "searched: labels=[$(printf '%s' "$labels" | tr '\n' ',')] title=[$title]"
+    echo "candidates:"; printf '  - %s\n' "${reasons[@]:-(none)}"
+    echo "chosen:    $RESOLVED_SKILL"
+    echo "reason:    $RESOLVED_SKILL_REASON"
+  } > "$logdir/skill-resolution.log"
+  log "Resolved skill: $RESOLVED_SKILL ($RESOLVED_SKILL_REASON)"; }
 
 # --- Code diff vs {{BASE_BRANCH}}, INCLUDING new files. CRITICAL: plain
 #     `git diff <base>` omits UNTRACKED files, so a brand-new file from the
@@ -332,6 +404,15 @@ process_issue() {  # <issue>
   logdir="$(ensure_logdir "$issue")"; orig="$(git branch --show-current)"
   branch="$(create_issue_branch "$issue" "$title")"; log "Branch: $branch"
 
+  # 0. Resolve the designated skill ONCE for this task (deterministic; logged).
+  #    Globals RESOLVED_SKILL / RESOLVED_SKILL_REASON are then injected by the
+  #    implement/fix/refactor prompt builders. Issue mode matches on labels; the local
+  #    task-list variant (no labels) relies on title: matchers against the task title.
+  local labels
+  # Newline-join so multi-word labels ("good first issue") stay one token (see resolve_skill).
+  labels="$(gh issue view "$issue" --json labels --jq '[.labels[].name]|join("\n")')"
+  resolve_skill "$labels" "$title" "$body" "$logdir"
+
   # 1. Implement
   build_implementation_prompt "$issue" "$title" "$body" "$logdir/prompt-impl.txt"
   run_impl_model "$logdir/prompt-impl.txt" > "$logdir/01-impl.log" 2>&1 \
@@ -420,3 +501,4 @@ log "Done. Completed $COMPLETED issue(s)."
 - **Detached runs should be first-class** — keep the `--tmux-session` / `--tmux-log` path working so long unattended batches can be launched safely without rewriting the script wrapper.
 - **Stack-agnostic checks** — `run_checks` just iterates `CHECKS[]` from CLAUDE.md and `eval`s each command. Do not add runtime/manifest guards (`package.json`, `pyproject.toml`, …); the commands themselves are the toolchain. Empty `CHECKS[]` is a valid no-op pass.
 - **No assumed model CLIs beyond what roles need** — Sonnet/Opus/Codex are examples, not defaults. Generate runner functions from the user-confirmed model/CLI plan and omit unused paths for single-review projects.
+- **Skill resolution is deterministic and logged.** `resolve_skill` runs exactly once per task (before implementation), seeded from `SKILL_MAP` (AGENTS.md *Skill Policy*). An empty `SKILL_MAP` is a valid no-op (`(none)`); exactly one distinct match is chosen; **more than one distinct match is `(ambiguous)` — inject nothing and log it, never pick one**. There is no registry, no network, and no semantic fallback. Every decision is written to `$logdir/skill-resolution.log` (`searched` / `candidates` / `chosen` / `reason`). The result is injected **only** into the implement/fix/refactor prompts — reviewers, check-fix, and the memory step stay skill-neutral.

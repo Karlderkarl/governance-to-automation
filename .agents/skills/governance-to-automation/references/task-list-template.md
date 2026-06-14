@@ -83,6 +83,7 @@ How the script consumes it (replacing the `gh` selection in the template):
 
 - Pick the first task whose `status: open` and whose `depends on` tasks are all `done`.
 - Derive the branch from the task number/title.
+- For skill resolution, call `resolve_skill` with an empty label string (a task-list task has no labels), so only `title:` matchers in the AGENTS.md *Skill Policy* can resolve a skill in this variant.
 - After review passes, the memory step flips `status: open → done` (and archives the completed line) — the task-list file is the local analogue of "closing the issue".
 - A task with unmet dependencies is skipped silently, exactly like `Depends on #N`.
 - **`--dry-run` must stay read-only**: print the task it *would* run, but do **not** flip `status` or otherwise write the task file. A dry-run that dirties `refact-todo.md` would trip the next real run's clean-worktree guard. Guard the status flip behind the dry-run check.

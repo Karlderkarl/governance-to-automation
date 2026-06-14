@@ -16,14 +16,20 @@ You are implementing issue #<issue> for <PROJECT_NAME>.
 **#<issue>: <title>**
 <body>
 
+<!-- Render ONLY when RESOLVED_SKILL is a real skill (not "(none)"/"(ambiguous)"): -->
+## Designated skill
+This task resolves to the `<RESOLVED_SKILL>` skill (reason: <RESOLVED_SKILL_REASON>). Use it for this work.
+
 ## Instructions
-- Read SOUL.md and MEMORY.md before starting. Read <REFERENCE_DOCS> if relevant.
-- Implement in small, testable steps, following the coding standards in SOUL.md.
+- Read SOUL.md, AGENTS.md and MEMORY.md before starting. Read <REFERENCE_DOCS> if relevant.
+- Implement in small, testable steps, following the coding standards in SOUL.md and the prohibited actions in AGENTS.md.
 - Do NOT modify SOUL.md or AGENTS.md.
 - In MEMORY.md "Next Up", add ONE status line: `- #<issue> (<title>): implementing`
 - Do NOT write to "Completed Work" — the pipeline handles that after review.
 - Save all files. Do NOT commit — the pipeline handles that.
 ```
+
+The `## Designated skill` block is emitted by the script **only** when `resolve_skill` chose exactly one skill. For `(none)` or `(ambiguous)` the block is omitted entirely — the script never picks a skill for the agent to guess at.
 
 ## 2. build_review_prompt(label, issue, title, body, diff, outfile)
 
@@ -78,9 +84,13 @@ You are fixing review findings for issue #<issue>.
 ## Reviewer B findings
 <contents of findings_b, or "(none)" for single-review projects>
 
+<!-- Render ONLY when RESOLVED_SKILL is a real skill (same rule as the implementation prompt): -->
+## Designated skill
+This task resolves to the `<RESOLVED_SKILL>` skill (reason: <RESOLVED_SKILL_REASON>). Use it for this work.
+
 ## Instructions
 - Address all CRITICAL and HIGH; address MEDIUM if straightforward.
-- Read SOUL.md for standards. Do NOT modify SOUL.md or AGENTS.md.
+- Read SOUL.md and AGENTS.md for standards and prohibited actions. Do NOT modify SOUL.md or AGENTS.md.
 - In MEMORY.md "Next Up", OVERWRITE the status line for this issue with:
   `- #<issue>: review round <round>, fixing: <brief>`
 - Do NOT append, and do NOT touch "Completed Work".
@@ -102,6 +112,10 @@ simpler and cleaner WITHOUT changing behavior.
 ## Issue
 **#<issue>: <title>**
 <body>
+
+<!-- Render ONLY when RESOLVED_SKILL is a real skill (same rule as the implementation prompt): -->
+## Designated skill
+This task resolves to the `<RESOLVED_SKILL>` skill (reason: <RESOLVED_SKILL_REASON>). Use it for this simplification.
 
 ## Ask — go file by file over the change and ask:
 - Would a senior engineer have written it this way?
@@ -155,13 +169,15 @@ The implementation for issue #<issue> has failing checks. Fix them.
 
 ## Instructions
 - Fix the failing checks (<list the CHECK_CMDS>).
-- Read SOUL.md for coding standards. Do NOT modify SOUL.md or AGENTS.md.
+- Read SOUL.md and AGENTS.md for coding standards and prohibited actions. Do NOT modify SOUL.md or AGENTS.md.
 - Do NOT commit.
 ```
 
 ## Generation rules
 
 - Always include "Do NOT modify SOUL.md or AGENTS.md" and "Do NOT commit" in every write-capable prompt — these enforce the skill boundaries inside the autonomous loop.
+- Every write-capable prompt (implement, fix, check-fix, refactor) must instruct the agent to **read SOUL.md and AGENTS.md** first — SOUL.md carries the coding standards, AGENTS.md the prohibited actions and role boundaries. Omitting AGENTS.md lets the agent miss those constraints (see SKILL.md Step 4).
+- The `## Designated skill` block goes **only** into the implementation, fix, and refactor prompts, and only when `resolve_skill` chose exactly one skill (`RESOLVED_SKILL` is real). The review, check-fix, and memory-update prompts must stay skill-neutral — reviewers judge against governance, not a designated skill.
 - Always include the single-status-line / overwrite / archive rules verbatim from the governance memory policy.
 - Keep `{{GOVERNANCE_REVIEW_FOCUS}}` short and regenerate it on Audit/Sync so reviewers never enforce stale rules.
 - Use heredocs to write prompts to temp files; never pass large prompts as CLI args.

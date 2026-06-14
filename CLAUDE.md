@@ -34,6 +34,7 @@ The skill is a directory with `SKILL.md` (YAML frontmatter `name` + `description
 - **Priority levels**: **Critical** / **Required** / **Advisory**, used only where they sharpen real stakes.
 - **Link, don't duplicate**: prompts and references instruct agents to *read* the governance files rather than copying large governance text (single source of truth).
 - **Stack-agnostic**: `governance-to-automation` must never assume a toolchain. Validation commands come verbatim from the target project's `CLAUDE.md` into a `CHECKS=()` array; an empty array is a valid no-op. Do not reintroduce `package.json`/runtime guards or hardcode npm/pnpm/uv/cargo as a default.
+- **Deterministic skill resolution**: when the generated pipeline designates a task-specific skill, the decision comes from explicit governance/user-approved `SKILL_MAP` matchers — only `label:` and `title:` types, both resolved without touching the filesystem — and is logged once per task. Do not add registry lookup, network discovery, free semantic search, or a filesystem-dependent `path:` matcher as a hard decision basis; ambiguity must resolve to no injection rather than guessing.
 - **One project = one folder**; the governance files and `memory/` live together at the project root.
 - Privileged flags in generated scripts (`bypassPermissions`, `danger-full-access`, auto-merge) are **off by default** and require explicit user opt-in.
 

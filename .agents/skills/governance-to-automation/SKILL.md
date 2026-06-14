@@ -46,6 +46,19 @@ The four governance files are authoritative inputs. This skill consumes them and
 
 If the governance does not yet specify these, that is `[NEEDS GOVERNANCE]` — route back to the `prd-to-governance` skill ([github.com/Karlderkarl/prd-to-governance](https://github.com/Karlderkarl/prd-to-governance)), which owns the structure and update rules for `MEMORY.md` and the other governance files, rather than inventing the policy here.
 
+## Deterministic skill resolution
+
+**Required** — If a task should use a specific skill, that decision must be **deterministic and live in the generated script**, never left to a model turn. Otherwise "project-first" behaviour, audit logging, and reproducibility are a hope, not a property. The generated `auto-develop.sh` carries a `resolve_skill` step (see `references/auto-develop-template.md`) with these invariants:
+
+- **Mechanism in the script.** A `SKILL_MAP` array of **explicit matchers** (`label:` / `title:` → skill) is the only decision basis. Both matchers resolve deterministically without touching the filesystem. There is **no registry, no network, and no free semantic search** as a hard decision basis.
+- **Resolve once per task.** `resolve_skill` runs a single time per task (before implementation) and sets `RESOLVED_SKILL` / `RESOLVED_SKILL_REASON`.
+- **Inject only where work happens.** The result is injected **only** into the implement / fix / refactor prompts. Reviewers, check-fix, and the memory step stay skill-neutral.
+- **Ambiguity over guessing.** Exactly one distinct match is chosen; **more than one distinct match is `(ambiguous)` and nothing is injected** — the script never picks one. Zero matches is `(none)`.
+- **Always logged.** Each decision is written to `$LOGDIR/<task>/skill-resolution.log` (`searched` / `candidates` / `chosen` / `reason`).
+- **No-op default.** `SKILL_MAP=()` is fully functional — the pipeline runs unchanged with no skill policy. The policy is **preferred from governance** (AGENTS.md *Skill Policy*) but an operator may also author entries locally (e.g. from a skill's own tags/triggers/labels).
+
+The governance source for `SKILL_MAP` is an AGENTS.md *Skill Policy* section, owned by `prd-to-governance`. That producing side is parallel work in its repo; until it exists, leave `SKILL_MAP` empty or let the user set it locally — never block generation on it.
+
 ## Two-pass pipeline: correctness, then refactor
 
 Each task runs through **two** review-backed passes:
@@ -99,6 +112,7 @@ Read all four files completely and extract the values the script needs. Use `ref
 - **Task source**: GitHub Issues + label, or a local task-list file, or MEMORY.md "Next Up".
 - **Memory paths + rules** (from MEMORY.md *Update Rules*): `MEMORY.md`, the archive path, the status-line and exclusion rules above.
 - **Review focus** (from SOUL.md security/coding + AGENTS.md prohibited actions): the concise rule set to inject into review prompts.
+- **Skill policy** (from AGENTS.md *Skill Policy*, if present): the explicit `label:`/`title:` → skill matchers that seed `SKILL_MAP`. **Absent is fine** — an empty `SKILL_MAP` is a valid no-op, not `[NEEDS GOVERNANCE]`. Never invent matchers.
 - **Reference docs + env vars + toolchain setup**: any PATH export, runtime activation, or `# planned` setup the project's commands need before they run, plus reference docs the agents should read. Derive these only from governance — never hardcode a default toolchain.
 
 If a required parameter is missing, mark it `[NEEDS GOVERNANCE]` (route back) or `[USER DECISION REQUIRED]` (ask), do not guess.
@@ -129,6 +143,7 @@ Present what you extracted, then confirm the choices that are strategic, not inf
 4. **Execution environment**: local CLI (`claude -p`, `codex exec`) vs CI; permission/sandbox level. **Critical** — `bypassPermissions`/`danger-full-access` require explicit user opt-in.
 5. **Run mode**: foreground shell only, or detached long-run support as well? Default: generate a `tmux`-friendly launch path and document a command such as `./auto-develop.sh --max-issues 100` plus the detached `tmux` equivalent.
 6. **Scope guards**: max issues per run, dry-run default.
+7. **Skill policy**: show the resolved `SKILL_MAP` entries (or "none") for sign-off. Mark any entry that came from local operator input rather than AGENTS.md *Skill Policy*. Default is an empty map (no-op) when governance declares no policy — do not invent matchers.
 
 ### Step 4: Generate `auto-develop.sh`
 
@@ -137,6 +152,7 @@ From `references/auto-develop-template.md`, produce the project's script:
 - Fill in checks, the explicitly confirmed model/runner mapping, base branch, label/task-source, memory paths, reference docs, PATH/toolchain.
 - Build the prompt functions from `references/prompt-builders.md`, injecting the SOUL/AGENTS rules and always instructing agents to read `SOUL.md`/`AGENTS.md`/`MEMORY.md` first (single source of truth — do not duplicate large governance text into the script).
 - Wire every memory rule from the *Memory discipline* section above. This is the part most likely to be done wrong; verify each rule is present.
+- Wire the *Deterministic skill resolution* step: fill `SKILL_MAP` from the AGENTS.md *Skill Policy* plus any explicitly user-approved local entries (empty array only if both are absent), keep the `resolve_skill` function and its one-per-task call before implementation, and inject `RESOLVED_SKILL` only into the implement/fix/refactor prompts. Confirm the decision is logged to `skill-resolution.log`.
 - Keep the proven control flow: clean-worktree guard, dependency check, branch management, checks-with-autofix, correctness review loop with no-op detection, refactor stage (simplify → re-check → re-review) with no-op/round guards, memory-update step, commit/PR (and merge only if opted in).
 - Factor the A/B review + fix loop into one `review_until_pass` function reused by both the correctness pass and the refactor re-validation; gate the refactor stage on `REFACTOR`/`--no-refactor` and bound it with `MAX_REFACTOR_ROUNDS`. Add `build_refactor_prompt` from `references/prompt-builders.md` — behavior-preserving simplification only, with the "make no change if already clean" instruction that drives convergence.
 
@@ -169,6 +185,7 @@ Do not rewrite blindly. Read the existing script, re-extract parameters from cur
 - **Role/model drift** — script roles, runners, or model selections differ from AGENTS.md/CLAUDE.md expectations
 - **Memory-rule drift** — script no longer matches MEMORY.md update rules (diff exclusion, status-line, archive ownership, no-op detection)
 - **Convention drift** — base branch, label, commit format, or dependency handling diverged
+- **Skill-policy drift** — `SKILL_MAP` no longer matches the AGENTS.md *Skill Policy* plus explicitly user-approved local entries (stale/missing matchers, entries with neither a policy nor a user-approval source, or overlapping rules that now resolve to `(ambiguous)`)
 
 Present findings, then update only the approved parts.
 
@@ -181,6 +198,7 @@ Present findings, then update only the approved parts.
 - **Long unattended run?** Generate explicit `tmux` launch guidance or an in-script detached mode so the operator can safely run long batches such as `./auto-develop.sh --max-issues 100`.
 - **Refactor pass not wanted?** It is on by default; generate the `--no-refactor` flag (and `--max-refactor-rounds`) so the operator can skip or bound the simplification pass. For cost-sensitive or trivial-change projects, defaulting it off is a valid choice — confirm in Step 3.
 - **Any stack?** The script never assumes one. Whatever CLAUDE.md lists as validation commands (npm/pnpm, uv/poetry, cargo, go, make, gradle, or none) becomes the check list as-is; the toolchain-setup line carries only what governance specifies.
+- **No skill policy?** `SKILL_MAP=()` is a valid no-op — the pipeline runs unchanged. Do not invent matchers; let the user add local entries if they want skill resolution before AGENTS.md *Skill Policy* exists.
 - **Governance thin or missing?** Stop and route to `prd-to-governance`; never invent the contract here.
 - **Security-sensitive project?** Keep the SOUL.md prohibitions in the review prompt and require explicit opt-in for any bypass/sandbox flags.
 
@@ -196,6 +214,7 @@ Before presenting:
 - [ ] The backlog was **materialized** from the AGENTS.md Phase Plan into that source (task-list scaffolded, or issues seeded via `gh issue create` after explicit approval) — not merely documented as a convention
 - [ ] The generated usage covers detached long runs (`tmux` or equivalent) when the user asked for unattended execution
 - [ ] Every memory-discipline rule is present in the generated script (diff exclusion, single Next Up line, archive-only completed work, no-op detection, dependency blocking)
+- [ ] Skill resolution is deterministic: `SKILL_MAP` came from AGENTS.md *Skill Policy* or from explicitly user-approved local entries (or is an empty no-op) — never silently invented; `resolve_skill` runs once per task and logs `searched`/`candidates`/`chosen`/`reason`, `(ambiguous)` injects nothing, and the result is injected only into the implement/fix/refactor prompts
 - [ ] The refactor pass (unless `--no-refactor`) runs only after the correctness state is committed as a checkpoint, re-validates through A/B via the shared `review_until_pass`, **keeps a round only on a clean re-review** (reverts to the checkpoint otherwise — degraded refactors are never kept and correctness work is never lost), is behavior-preserving only, and is bounded by no-op detection + `MAX_REFACTOR_ROUNDS`
 - [ ] Metadata reflects the real history, not a pre-refactor snapshot: commit reports the delivered A/B rounds (correctness plus accepted refactor re-reviews, not discarded refactor attempts), and the memory archive gates "last fix" on correctness fix rounds and the simplification note on `REFACTOR_ROUNDS` (the two are not conflated)
 - [ ] `SOUL.md`, `AGENTS.md`, `CLAUDE.md` were **not** edited; only `MEMORY.md` + automation artifacts changed

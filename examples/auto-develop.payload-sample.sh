@@ -91,7 +91,6 @@ TMUX_LOGFILE="logs/auto-develop.tmux.log"
 NO_TMUX_REEXEC=false
 
 LOGDIR="logs/issues"
-REPO_ROOT="$(git rev-parse --show-toplevel)"
 CLAUDE_PERMISSION_MODE="bypassPermissions"
 
 # Ensure pnpm is available regardless of how the script is invoked
@@ -639,7 +638,8 @@ run_review() {
   local file_tree
   file_tree="$(find . -maxdepth 4 \( -path './node_modules' -o -path './.git' -o -path './.next' -o -path './logs' \) -prune -o -type f -print | sort | head -80 2>/dev/null || echo '(unavailable)')"
 
-  local prompt_file="$logdir/prompt-review-$(echo "$reviewer_label" | tr ' ()' '---').txt"
+  local prompt_file
+  prompt_file="$logdir/prompt-review-$(echo "$reviewer_label" | tr ' ()' '---').txt"
   build_review_prompt "$reviewer_label" "$issue" "$title" "$body" "$diff" "$file_tree" "$prompt_file"
 
   log "Running $reviewer_label review with model=$reviewer_model..."

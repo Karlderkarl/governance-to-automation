@@ -20,6 +20,7 @@ What to pull from each governance file to parameterize `auto-develop.sh`. Work t
 - [ ] **Delivery standard** → what "done" requires (drives whether the script stops at PR or merges)
 - [ ] **Phase plan** → seed for the task source (issues or task-list)
 - [ ] **Auto-Develop Policy** (if present) → binding rules already written for the pipeline; the script must match them exactly
+- [ ] **Skill Policy** (if present) → `{{SKILL_MAP[]}}` — explicit matchers, one per line, `<type>:<pattern> = <skill>` with type `label` / `title` (the parser trims, so whitespace around `:` and `=` is optional). A `label` pattern is matched against the whole label, so multi-word labels (`good first issue`, `area: auth`) are fine; a `title` pattern is an extended regex against the task title/body. Absent = empty map (valid no-op); never invent matchers. Multiple distinct matches resolve to `(ambiguous)` at runtime, so flag any overlapping rules back as policy to tighten — do not add precedence here.
 
 ## From CLAUDE.md
 
@@ -49,6 +50,7 @@ What to pull from each governance file to parameterize `auto-develop.sh`. Work t
 - [ ] Commands referenced in prompts/checks actually exist in CLAUDE.md
 - [ ] Memory rules in the script match MEMORY.md *Update Rules* verbatim in intent
 - [ ] Base branch in the script matches AGENTS.md git conventions
+- [ ] `SKILL_MAP[]` matches the AGENTS.md *Skill Policy* or explicitly user-approved local entries (or is empty when there is none); no matcher was silently invented, and overlapping rules are flagged back rather than ordered by precedence
 - [ ] GitHub-issue mode includes a concrete issue-seeding plan from the AGENTS.md phase plan, not just a label convention
 
 ## Output of this step
@@ -60,7 +62,8 @@ ROLE_SLOTS, GOVERNANCE_MODEL_DEFAULTS, CONFIRMED_MODEL_SELECTIONS(+effort/+runne
 BASE_BRANCH, TASK_SOURCE(+label/file), CHECK_CMDS[], TOOLCHAIN_SETUP, MEMORY_FILE,
 ARCHIVE_FILE, REFERENCE_DOCS, GOVERNANCE_REVIEW_FOCUS (8-15 bullets),
 PERMISSION_MODE/SANDBOX (user opt-in), MAX_ROUNDS, MERGE_POLICY,
-ISSUE_SEED_PLAN, DETACHED_RUN_MODE
+ISSUE_SEED_PLAN, DETACHED_RUN_MODE,
+SKILL_MAP[] (AGENTS.md Skill Policy + user-approved local entries; empty only if both absent)
 ```
 
 Carry this into Step 4 (generate the script) and Step 5 (supporting artifacts).

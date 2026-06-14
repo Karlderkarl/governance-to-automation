@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-06-15
+
+### Added
+- Deterministic task-to-skill resolution guidance for generated pipelines via explicit `SKILL_MAP`
+  matchers — `label:` and `title:` types only, both resolved without filesystem access — including
+  one-time per-task logging and prompt injection only for implementation, fix, and refactor work.
+
+### Changed
+- Clarified that skill resolution must not rely on registries, network discovery, semantic search, or
+  model guessing; ambiguous matches inject no designated skill.
+- Write-capable prompts (implement, fix, check-fix, refactor) now instruct agents to read both
+  `SOUL.md` and `AGENTS.md` first, so prohibited actions and role boundaries are never missed.
+
 ## [1.0.0] - 2026-06-13
 
 First stable release of the **governance-to-automation** skill.
