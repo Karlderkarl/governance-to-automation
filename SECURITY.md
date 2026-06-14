@@ -27,4 +27,4 @@ The latest release is supported.
 
 | Version | Supported |
 |---|---|
-| 1.0.x | ✅ |
+| 1.1.x | ✅ |

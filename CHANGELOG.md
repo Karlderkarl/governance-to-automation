@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-06-15
+
+### Fixed
+- Every write-capable prompt now forbids editing `CLAUDE.md` alongside `SOUL.md` and `AGENTS.md`
+  (implement, fix, refactor, check-fix, memory, plus the generation rule). The guard previously
+  named only `SOUL.md`/`AGENTS.md`, so an agent could edit `CLAUDE.md` and have it staged into the
+  issue commit — contradicting the contract that the pipeline writes only `MEMORY.md` + artifacts.
+- The implementation prompt now sets the "Next Up" status line with explicit overwrite semantics
+  ("overwrite, do not append") instead of "add ONE", matching the fix prompt and the
+  overwrite-never-append memory invariant so reruns can't grow the status line.
+
+### Changed
+- `SECURITY.md` supported-versions table updated to `1.1.x` to match the latest release.
+
 ## [1.1.1] - 2026-06-15
 
 ### Fixed

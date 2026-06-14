@@ -23,8 +23,8 @@ This task resolves to the `<RESOLVED_SKILL>` skill (reason: <RESOLVED_SKILL_REAS
 ## Instructions
 - Read SOUL.md, AGENTS.md and MEMORY.md before starting. Read <REFERENCE_DOCS> if relevant.
 - Implement in small, testable steps, following the coding standards in SOUL.md and the prohibited actions in AGENTS.md.
-- Do NOT modify SOUL.md or AGENTS.md.
-- In MEMORY.md "Next Up", add ONE status line: `- #<issue> (<title>): implementing`
+- Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md.
+- In MEMORY.md "Next Up", set (overwrite, do not append) ONE status line: `- #<issue> (<title>): implementing`
 - Do NOT write to "Completed Work" — the pipeline handles that after review.
 - Save all files. Do NOT commit — the pipeline handles that.
 ```
@@ -90,7 +90,7 @@ This task resolves to the `<RESOLVED_SKILL>` skill (reason: <RESOLVED_SKILL_REAS
 
 ## Instructions
 - Address all CRITICAL and HIGH; address MEDIUM if straightforward.
-- Read SOUL.md and AGENTS.md for standards and prohibited actions. Do NOT modify SOUL.md or AGENTS.md.
+- Read SOUL.md and AGENTS.md for standards and prohibited actions. Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md.
 - In MEMORY.md "Next Up", OVERWRITE the status line for this issue with:
   `- #<issue>: review round <round>, fixing: <brief>`
 - Do NOT append, and do NOT touch "Completed Work".
@@ -128,7 +128,7 @@ behavior, or expand scope. If the code is already clean and a senior engineer wo
 sign off as-is, make NO changes at all.
 
 ## Instructions
-- Read SOUL.md (and AGENTS.md) for standards first. Do NOT modify SOUL.md or AGENTS.md.
+- Read SOUL.md (and AGENTS.md) for standards first. Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md.
 - Keep every existing check passing.
 - In MEMORY.md "Next Up", OVERWRITE the status line for this issue with:
   `- #<issue>: refactor round <round>, simplifying: <brief or "no change needed">`
@@ -156,7 +156,7 @@ Format: `- <title> (#<issue>): <brief what was built>[. Last fix: <final fix>][.
 Rules:
 - Read MEMORY.md's Update Rules first; MEMORY.md stays lean.
 - 1-2 lines max. Don't document review cycles or reviewer names.
-- Do NOT modify SOUL.md or AGENTS.md.
+- Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md.
 - Do NOT commit — the pipeline folds these memory edits into the one issue commit.
 ```
 
@@ -170,13 +170,13 @@ The implementation for issue #<issue> has failing checks. Fix them.
 
 ## Instructions
 - Fix the failing checks (<list the CHECK_CMDS>).
-- Read SOUL.md and AGENTS.md for coding standards and prohibited actions. Do NOT modify SOUL.md or AGENTS.md.
+- Read SOUL.md and AGENTS.md for coding standards and prohibited actions. Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md.
 - Do NOT commit.
 ```
 
 ## Generation rules
 
-- Always include "Do NOT modify SOUL.md or AGENTS.md" and "Do NOT commit" in **every** write-capable prompt — these enforce the skill boundaries inside the autonomous loop. The memory-update prompt counts: it writes `MEMORY.md`/the archive, and the pipeline owns the commit (it amends the issue commit right after), so a stray agent commit would corrupt that flow.
+- Always include "Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md" and "Do NOT commit" in **every** write-capable prompt — these enforce the skill boundaries inside the autonomous loop (the pipeline writes only `MEMORY.md` + generated artifacts; all three governance files are off-limits, corrections route back through `prd-to-governance`). The memory-update prompt counts: it writes `MEMORY.md`/the archive, and the pipeline owns the commit (it amends the issue commit right after), so a stray agent commit would corrupt that flow.
 - The four **code-writing** prompts (implement, fix, check-fix, refactor) must instruct the agent to **read SOUL.md and AGENTS.md** first — SOUL.md carries the coding standards, AGENTS.md the prohibited actions and role boundaries. Omitting AGENTS.md lets the agent miss those constraints (see SKILL.md Step 4). The memory-update prompt is skill-neutral and instead reads **MEMORY.md's Update Rules** (it touches only memory, not code).
 - The `## Designated skill` block goes **only** into the implementation, fix, and refactor prompts, and only when `resolve_skill` chose exactly one skill (`RESOLVED_SKILL` is real). The review, check-fix, and memory-update prompts must stay skill-neutral — reviewers judge against governance, not a designated skill.
 - Always include the single-status-line / overwrite / archive rules verbatim from the governance memory policy.
