@@ -4,7 +4,7 @@ Blueprints for the prompt functions the generated `auto-develop.sh` writes to te
 
 ## Design principle: link vs inline
 
-- **Implementation / fix / memory prompts** → instruct the agent to read the governance files. The agent runs inside the repo, so it can. Keep these prompts short.
+- **Implementation / fix / refactor / memory prompts** → instruct the agent to read the governance files. The agent runs inside the repo, so it can. Keep these prompts short.
 - **Review prompts** → reviewers benefit from a compact, inline `{{GOVERNANCE_REVIEW_FOCUS}}` (the highest-stakes SOUL.md security/coding rules + AGENTS.md prohibited actions). Extract ~8-15 bullet points; do not paste whole files. Regenerate this extract whenever governance changes (Audit/Sync mode).
 
 ## 1. build_implementation_prompt(issue, title, body, outfile)
@@ -90,7 +90,7 @@ This task resolves to the `<RESOLVED_SKILL>` skill (reason: <RESOLVED_SKILL_REAS
 
 ## Instructions
 - Address all CRITICAL and HIGH; address MEDIUM if straightforward.
-- Read SOUL.md and AGENTS.md for standards and prohibited actions. Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md.
+- Read SOUL.md, AGENTS.md, and MEMORY.md's Update Rules for standards, prohibited actions, and memory handling. Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md.
 - In MEMORY.md "Next Up", OVERWRITE the status line for this issue with:
   `- #<issue>: review round <round>, fixing: <brief>`
 - Do NOT append, and do NOT touch "Completed Work".
@@ -128,7 +128,7 @@ behavior, or expand scope. If the code is already clean and a senior engineer wo
 sign off as-is, make NO changes at all.
 
 ## Instructions
-- Read SOUL.md (and AGENTS.md) for standards first. Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md.
+- Read SOUL.md, AGENTS.md, and MEMORY.md's Update Rules first. Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md.
 - Keep every existing check passing.
 - In MEMORY.md "Next Up", OVERWRITE the status line for this issue with:
   `- #<issue>: refactor round <round>, simplifying: <brief or "no change needed">`
@@ -177,7 +177,7 @@ The implementation for issue #<issue> has failing checks. Fix them.
 ## Generation rules
 
 - Always include "Do NOT modify SOUL.md, AGENTS.md, or CLAUDE.md" and "Do NOT commit" in **every** write-capable prompt — these enforce the skill boundaries inside the autonomous loop (the pipeline writes only `MEMORY.md` + generated artifacts; all three governance files are off-limits, corrections route back through `prd-to-governance`). The memory-update prompt counts: it writes `MEMORY.md`/the archive, and the pipeline owns the commit (it amends the issue commit right after), so a stray agent commit would corrupt that flow.
-- The four **code-writing** prompts (implement, fix, check-fix, refactor) must instruct the agent to **read SOUL.md and AGENTS.md** first — SOUL.md carries the coding standards, AGENTS.md the prohibited actions and role boundaries. Omitting AGENTS.md lets the agent miss those constraints (see SKILL.md Step 4). The memory-update prompt is skill-neutral and instead reads **MEMORY.md's Update Rules** (it touches only memory, not code).
+- The four **code-writing** prompts (implement, fix, check-fix, refactor) must instruct the agent to **read SOUL.md and AGENTS.md** first — SOUL.md carries the coding standards, AGENTS.md the prohibited actions and role boundaries. Any code-writing prompt that updates `MEMORY.md "Next Up"` (implement, fix, refactor) must also read **MEMORY.md's Update Rules** before writing the status line. Omitting AGENTS.md lets the agent miss those constraints (see SKILL.md Step 4). The memory-update prompt is skill-neutral and reads **MEMORY.md's Update Rules** because it touches only memory, not code.
 - The `## Designated skill` block goes **only** into the implementation, fix, and refactor prompts, and only when `resolve_skill` chose exactly one skill (`RESOLVED_SKILL` is real). The review, check-fix, and memory-update prompts must stay skill-neutral — reviewers judge against governance, not a designated skill.
 - Always include the single-status-line / overwrite / archive rules verbatim from the governance memory policy.
 - Keep `{{GOVERNANCE_REVIEW_FOCUS}}` short and regenerate it on Audit/Sync so reviewers never enforce stale rules.
