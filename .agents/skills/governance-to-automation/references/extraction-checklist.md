@@ -50,7 +50,7 @@ What to pull from each governance file to parameterize `auto-develop.sh`. Work t
 - [ ] Commands referenced in prompts/checks actually exist in CLAUDE.md
 - [ ] Memory rules in the script match MEMORY.md *Update Rules* verbatim in intent
 - [ ] Base branch in the script matches AGENTS.md git conventions
-- [ ] `SKILL_MAP[]` matches the AGENTS.md *Skill Policy* or explicitly user-approved local entries (or is empty when there is none); no matcher was silently invented, and overlapping rules are flagged back rather than ordered by precedence
+- [ ] `SKILL_MAP[]` matches the AGENTS.md *Skill Policy* or explicitly user-approved local entries (or is empty when there is none); no matcher was silently invented, and overlapping rules are flagged back rather than ordered by precedence. Every `title:` matcher is a **valid extended regex** (an invalid one resolves to no match at runtime and is only surfaced as a `skill-resolution.log` warning — catch it here instead)
 - [ ] GitHub-issue mode includes a concrete issue-seeding plan from the AGENTS.md phase plan, not just a label convention
 
 ## Output of this step

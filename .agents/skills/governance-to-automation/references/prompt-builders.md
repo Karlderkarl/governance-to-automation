@@ -154,9 +154,10 @@ Format: `- <title> (#<issue>): <brief what was built>[. Last fix: <final fix>][.
 - Include "Simplified in …" ONLY if <refactor_rounds> > 0 (the refactor pass changed code).
 
 Rules:
+- Read MEMORY.md's Update Rules first; MEMORY.md stays lean.
 - 1-2 lines max. Don't document review cycles or reviewer names.
 - Do NOT modify SOUL.md or AGENTS.md.
-- MEMORY.md stays lean — see its Update Rules.
+- Do NOT commit — the pipeline folds these memory edits into the one issue commit.
 ```
 
 ## 6. build_check_fix_prompt(issue, check_output, outfile)
@@ -175,8 +176,8 @@ The implementation for issue #<issue> has failing checks. Fix them.
 
 ## Generation rules
 
-- Always include "Do NOT modify SOUL.md or AGENTS.md" and "Do NOT commit" in every write-capable prompt — these enforce the skill boundaries inside the autonomous loop.
-- Every write-capable prompt (implement, fix, check-fix, refactor) must instruct the agent to **read SOUL.md and AGENTS.md** first — SOUL.md carries the coding standards, AGENTS.md the prohibited actions and role boundaries. Omitting AGENTS.md lets the agent miss those constraints (see SKILL.md Step 4).
+- Always include "Do NOT modify SOUL.md or AGENTS.md" and "Do NOT commit" in **every** write-capable prompt — these enforce the skill boundaries inside the autonomous loop. The memory-update prompt counts: it writes `MEMORY.md`/the archive, and the pipeline owns the commit (it amends the issue commit right after), so a stray agent commit would corrupt that flow.
+- The four **code-writing** prompts (implement, fix, check-fix, refactor) must instruct the agent to **read SOUL.md and AGENTS.md** first — SOUL.md carries the coding standards, AGENTS.md the prohibited actions and role boundaries. Omitting AGENTS.md lets the agent miss those constraints (see SKILL.md Step 4). The memory-update prompt is skill-neutral and instead reads **MEMORY.md's Update Rules** (it touches only memory, not code).
 - The `## Designated skill` block goes **only** into the implementation, fix, and refactor prompts, and only when `resolve_skill` chose exactly one skill (`RESOLVED_SKILL` is real). The review, check-fix, and memory-update prompts must stay skill-neutral — reviewers judge against governance, not a designated skill.
 - Always include the single-status-line / overwrite / archive rules verbatim from the governance memory policy.
 - Keep `{{GOVERNANCE_REVIEW_FOCUS}}` short and regenerate it on Audit/Sync so reviewers never enforce stale rules.

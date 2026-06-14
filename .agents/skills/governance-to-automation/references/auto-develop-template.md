@@ -268,7 +268,7 @@ ensure_checks_pass() {  # <issue> <logdir> <prefix>
 resolve_skill() {  # <labels> <title> <body> <logdir>
   local labels="$1" title="$2" body="$3" logdir="$4"
   local text="$title"$'\n'"$body"
-  local -a reasons=() distinct=()
+  local -a reasons=() distinct=() warnings=()
   local entry lhs type pat skill matched l d seen
   for entry in "${SKILL_MAP[@]}"; do
     [[ "$entry" == *=* ]] || continue
@@ -279,7 +279,11 @@ resolve_skill() {  # <labels> <title> <body> <logdir>
       # Match each label as a WHOLE line; never word-split (would break labels with
       # spaces and could false-match a fragment of a multi-word label).
       label) while IFS= read -r l; do [[ -n "$l" && "$l" == "$pat" ]] && matched=true; done <<< "$labels" ;;
-      title) [[ "$text" =~ $pat ]] && matched=true ;;
+      # An invalid ERE makes [[ =~ ]] return 2 (not 1). Don't let a typo silently
+      # skip a configured skill with only noisy stderr: suppress the diagnostic,
+      # detect rc 2, and record an explicit warning into skill-resolution.log.
+      title) if [[ "$text" =~ $pat ]] 2>/dev/null; then matched=true
+             elif [[ $? -eq 2 ]]; then warnings+=("invalid title: regex '$pat' (entry '$entry') — treated as no match"); fi ;;
       *)     log "WARN: unknown SKILL_MAP matcher type '$type' in '$entry'" ;;
     esac
     [[ "$matched" == true ]] || continue
@@ -297,9 +301,11 @@ resolve_skill() {  # <labels> <title> <body> <logdir>
   {
     echo "searched: labels=[$(printf '%s' "$labels" | tr '\n' ',')] title=[$title]"
     echo "candidates:"; printf '  - %s\n' "${reasons[@]:-(none)}"
+    [[ ${#warnings[@]} -gt 0 ]] && { echo "warnings:"; printf '  - %s\n' "${warnings[@]}"; }
     echo "chosen:    $RESOLVED_SKILL"
     echo "reason:    $RESOLVED_SKILL_REASON"
   } > "$logdir/skill-resolution.log"
+  [[ ${#warnings[@]} -gt 0 ]] && log "WARN: ${#warnings[@]} invalid SKILL_MAP matcher(s) — see $logdir/skill-resolution.log"
   log "Resolved skill: $RESOLVED_SKILL ($RESOLVED_SKILL_REASON)"; }
 
 # --- Code diff vs {{BASE_BRANCH}}, INCLUDING new files. CRITICAL: plain
