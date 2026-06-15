@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-06-15
+
+### Fixed
+- Generated pipelines now **branch each issue from the base branch** (not the current HEAD) and
+  return to the base branch after opening the PR. Previously, a `--max-issues > 1` run branched
+  issue N off issue N-1's still-unmerged tip, so issue N's review diff included the previous
+  issue's code.
+- The correctness checkpoint commit is now gated on a **non-empty code diff** (excluding
+  `MEMORY.md`/logs) instead of any repo change. Because `run_review` auto-approves an empty code
+  diff, a model that only rewrote the `MEMORY.md` "Next Up" line could previously pass review and
+  produce a memory-only "implemented" commit and PR.
+- Failure paths now roll back via a `return_to_base` helper that **discards** in-progress work
+  (`git reset --hard` + `git clean -fd -e "$LOGDIR"`) before returning to the base branch, instead
+  of a bare `git checkout "$orig"` that could block the checkout or carry half-written changes onto
+  the base branch (tripping the next run's clean-worktree guard). The `clean` excludes the log dir
+  so the failing issue's diagnostic logs survive even if `logs/` was never gitignored; the refactor
+  revert excludes it the same way.
+- No-op/refactor convergence detection now hashes the code diff with `git hash-object --stdin`
+  instead of `md5sum`, which is absent by default on macOS/Windows and would make a generated
+  script die under `set -euo pipefail` — restoring the documented "bash + git + gh only" contract.
+
+### Changed
+- README clarifies that the `examples/` fixture is a **pre-refactor** snapshot, not a current
+  reference for the refactor-pass invariants.
+
 ## [1.1.3] - 2026-06-15
 
 ### Fixed
@@ -73,4 +98,9 @@ First stable release of the **governance-to-automation** skill.
 - **Safe staging** that does not abort under `set -e` when the log directory is gitignored.
 - `--dry-run` is **side-effect-free** (never mutates tracked files).
 
+[1.1.4]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.1.4
+[1.1.3]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.1.3
+[1.1.2]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.1.2
+[1.1.1]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.1.1
+[1.1.0]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.0.0

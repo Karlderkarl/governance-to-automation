@@ -136,7 +136,7 @@ sign off as-is, make NO changes at all.
 - Save files. Do NOT commit.
 ```
 
-**Making no change when the code is already clean is the contract** — that is what lets the script detect convergence (the `md5sum` of the code diff is unchanged) and stop the refactor loop. Keep the "make NO changes" instruction explicit, and keep the MEMORY.md line excluded from the no-op comparison (the script already excludes `{{MEMORY_FILE}}`).
+**Making no change when the code is already clean is the contract** — that is what lets the script detect convergence (the `code_hash` of the code diff is unchanged) and stop the refactor loop. Keep the "make NO changes" instruction explicit, and keep the MEMORY.md line excluded from the no-op comparison (the script already excludes `{{MEMORY_FILE}}`).
 
 ## 5. build_memory_update_prompt(issue, title, fix_rounds, refactor_rounds, outfile)
 

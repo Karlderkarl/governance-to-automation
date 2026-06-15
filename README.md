@@ -36,4 +36,5 @@ The skill definition lives in `.agents/skills/`:
 - `.agents/skills/governance-to-automation/SKILL.md` — entry point
 - `.agents/skills/governance-to-automation/references/` — structural blueprints
   (`auto-develop-template.md`, `prompt-builders.md`, `task-list-template.md`, `extraction-checklist.md`)
-- `examples/` — a fully-resolved sample output (read-only fixture)
+- `examples/` — a fully-resolved **pre-refactor** sample output (read-only fixture; it predates
+  the refactor pass and is intentionally not re-synced — see the template for current invariants)

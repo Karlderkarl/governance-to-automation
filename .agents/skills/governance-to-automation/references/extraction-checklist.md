@@ -40,7 +40,7 @@ What to pull from each governance file to parameterize `auto-develop.sh`. Work t
   - review diff excludes the memory file (`git diff <base> -- . ':!MEMORY.md'`)
   - implementation/fix steps write ONE overwritten "Next Up" line
   - only the post-review memory step writes completed work, to the archive
-  - no-op fix detection (md5sum of code diff excluding memory + logs)
+  - no-op fix detection (hash of code diff excluding memory + logs, via `git hash-object`)
 - [ ] **Task source declaration** → GitHub Issues / task-list / Next Up (drives candidate selection)
 - [ ] **Current blockers** → anything that should make the run refuse to start
 

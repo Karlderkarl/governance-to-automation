@@ -188,6 +188,18 @@ require_clean_worktree() {
 # drops logs if they happen to be tracked.
 stage_repo_changes() { git add -A; git reset -q -- "$LOGDIR" >/dev/null 2>&1 || true; }
 
+# Abort helper for the per-issue failure paths: DISCARD any in-progress work, then return
+# to BASE_BRANCH. A bare `git checkout "$orig"` is unsafe — half-written impl/fix changes
+# either block the checkout or get carried onto the base branch, tripping the next run's
+# clean-worktree guard. All callers run BEFORE the correctness checkpoint commit, so HEAD
+# is still at the base tip and `reset --hard` only drops uncommitted work. `clean` excludes
+# $LOGDIR explicitly so this issue's freshly written FAILURE logs survive for debugging even
+# if the operator never gitignored logs/ (don't rely on the gitignore for that).
+return_to_base() {
+  git reset --hard HEAD >/dev/null 2>&1 || true
+  git clean -fd -e "$LOGDIR" >/dev/null 2>&1 || true
+  git checkout "$BASE_BRANCH" >/dev/null 2>&1 || log "WARN: could not return to $BASE_BRANCH"; }
+
 # --- Model runners: generate these from the Step 3 confirmed model/CLI mapping.
 # Example only: Sonnet/Opus may route through `claude -p`, Codex through `codex exec`.
 # Do not assume those defaults; write the runner functions to match the user's selection.
@@ -217,9 +229,13 @@ check_dependencies() {  # <n> -> non-zero if any "Depends on #N" is still open
     [[ "$(gh issue view "$d" --json state --jq '.state')" != "CLOSED" ]] && \
       { log "Blocked by #$d"; return 1; }; done; return 0; }
 
+# Branch the issue from BASE_BRANCH (never from the current HEAD) so successive issues in a
+# --max-issues > 1 run never stack on an earlier, still-unmerged issue branch — otherwise
+# issue N's review diff would include issue N-1's code.
 create_issue_branch() {  # <n> <title>
   local b="issue-$1-$(slugify "$2")"
-  git show-ref --verify --quiet "refs/heads/$b" && git checkout "$b" || git checkout -b "$b"
+  if git show-ref --verify --quiet "refs/heads/$b"; then git checkout "$b"
+  else git checkout -b "$b" "$BASE_BRANCH"; fi
   echo "$b"; }
 
 # --- Checks: run each command in CHECKS[] in order; auto-fix once on failure.
@@ -315,7 +331,11 @@ resolve_skill() {  # <labels> <title> <body> <logdir>
 #     Excludes MEMORY.md; logs are never staged (pathspec exclude + usually gitignored). ---
 stage_for_diff() { stage_repo_changes; }   # same staging; new files become visible to git diff
 code_diff() { stage_for_diff; git diff --cached "$BASE_BRANCH" -- . ":!$MEMORY_FILE"; }
-code_hash() { stage_for_diff; git diff --cached "$BASE_BRANCH" -- . ":!$MEMORY_FILE" | md5sum; }
+# Hash the code diff with `git hash-object` (git is already a hard dep), NOT `md5sum`:
+# md5sum is absent by default on macOS/Windows, so under `set -euo pipefail` a generated
+# script would die — less portable than the "bash + git + gh" contract claims. An empty
+# diff hashes to the stable empty-blob id, so no-op detection still works.
+code_hash() { stage_for_diff; git diff --cached "$BASE_BRANCH" -- . ":!$MEMORY_FILE" | git hash-object --stdin; }
 
 # --- Review: uses code_diff (full uncommitted work vs {{BASE_BRANCH}} — new files
 #     included, MEMORY.md excluded) so status churn is hidden but real changes are not ---
@@ -388,7 +408,7 @@ refactor_stage() {  # <issue> <title> <body> <logdir>
     if [[ "$ok" != true ]]; then
       log "Refactor round $r not cleanly approved; reverting this round to the checkpoint and stopping."
       git reset --hard HEAD >/dev/null 2>&1   # back to the checkpoint (correctness + prior clean refactors)
-      git clean -fd >/dev/null 2>&1           # drop files the bad round added (logs/ is gitignored)
+      git clean -fd -e "$LOGDIR" >/dev/null 2>&1   # drop files the bad round added; keep this issue's logs
       return 0
     fi
     # Accepted: fold this cleanly-reviewed refactor into the checkpoint commit.
@@ -404,10 +424,10 @@ refactor_stage() {  # <issue> <title> <body> <logdir>
 # --- Per-issue pipeline ---
 process_issue() {  # <issue>
   require_clean_worktree || return 1
-  local issue="$1" title body logdir branch orig
+  local issue="$1" title body logdir branch
   title="$(gh issue view "$issue" --json title --jq '.title')"
   body="$(gh issue view "$issue" --json body --jq '.body')"
-  logdir="$(ensure_logdir "$issue")"; orig="$(git branch --show-current)"
+  logdir="$(ensure_logdir "$issue")"
   branch="$(create_issue_branch "$issue" "$title")"; log "Branch: $branch"
 
   # 0. Resolve the designated skill ONCE for this task (deterministic; logged).
@@ -422,21 +442,24 @@ process_issue() {  # <issue>
   # 1. Implement
   build_implementation_prompt "$issue" "$title" "$body" "$logdir/prompt-impl.txt"
   run_impl_model "$logdir/prompt-impl.txt" > "$logdir/01-impl.log" 2>&1 \
-    || { git checkout "$orig"; return 1; }
+    || { return_to_base; return 1; }
   # 2. Checks
-  ensure_checks_pass "$issue" "$logdir" "02-checks" || { git checkout "$orig"; return 1; }
+  ensure_checks_pass "$issue" "$logdir" "02-checks" || { return_to_base; return 1; }
 
   # 3. Correctness review loop (A/B) with no-op fix detection
-  review_until_pass "$issue" "$title" "$body" "$logdir" "03" || { git checkout "$orig"; return 1; }
+  review_until_pass "$issue" "$title" "$body" "$logdir" "03" || { return_to_base; return 1; }
   local review_rounds="$REVIEW_ROUNDS"
   DELIVERED_REVIEW_ROUNDS="$review_rounds"   # globals; refactor_stage accumulates accepted refactor re-reviews into these
   REFACTOR_ROUNDS=0
 
   # 3a. Checkpoint the correctness-approved state as the issue commit. This makes the
   #     refactor pass safe: a bad refactor reverts to THIS commit (correctness work is
-  #     never lost), and only cleanly re-reviewed refactors are amended in. The guard
-  #     here also prevents empty issue commits.
-  has_repo_changes_outside_logs || { log "No changes for #$issue."; git checkout "$orig"; return 1; }
+  #     never lost), and only cleanly re-reviewed refactors are amended in. Gate on a
+  #     non-empty CODE diff (excludes MEMORY.md/logs), NOT has_repo_changes_outside_logs:
+  #     run_review auto-LGTMs an empty code diff, so a model that only rewrote the
+  #     MEMORY.md "Next Up" line would otherwise pass review and produce a memory-only
+  #     "implemented" commit + PR. No code change => nothing was built => skip the issue.
+  [[ -n "$(code_diff)" ]] || { log "No code changes for #$issue (only MEMORY.md/logs)."; return_to_base; return 1; }
   stage_repo_changes
   git commit -m "feat: implement #$issue - $title (correctness)" >/dev/null
 
@@ -466,7 +489,10 @@ Refactor pass: $refactor_summary
 Closes #$issue" >/dev/null
   git push -u origin "$branch"
   gh pr create --title "#$issue: $title" --body "Closes #$issue. Logs: \`$logdir/\`"
-  # {{IF auto-merge opted in}} gh pr merge "$branch" --squash && git checkout "$BASE_BRANCH" && git pull
+  # Return to BASE_BRANCH so the NEXT issue branches from a clean base rather than stacking
+  # on this still-unmerged branch. Safe: everything is committed at this point.
+  git checkout "$BASE_BRANCH" >/dev/null 2>&1 || log "WARN: could not return to $BASE_BRANCH"
+  # {{IF auto-merge opted in}} gh pr merge "$branch" --squash && git pull   # already on $BASE_BRANCH
   log "=== Done #$issue ==="; }
 
 # --- Candidate selection + main loop ---
@@ -491,18 +517,20 @@ log "Done. Completed $COMPLETED issue(s)."
 
 ## Generation rules
 
-- **Keep the guards.** `require_clean_worktree`, dependency blocking, and the `git checkout "$orig"` rollback on failure are what make the loop safe to re-run.
-- **Review/no-op diffs must include new files.** Build every review diff and no-op `md5sum` from a *staged* diff (`stage_for_diff` + `git diff --cached <base>`), never plain `git diff <base>` — the latter omits untracked files, so a brand-new implementation file would be reviewed as an empty diff and silently approved. Use the `code_diff` / `code_hash` helpers everywhere a code diff is needed.
+- **Keep the guards.** `require_clean_worktree`, dependency blocking, and the `return_to_base` rollback on failure are what make the loop safe to re-run. The rollback must **discard** in-progress work (`git reset --hard` + `git clean -fd -e "$LOGDIR"`, which keeps this issue's freshly written failure logs) before switching back, never a bare `git checkout "$orig"` — a half-written impl/fix would otherwise block the checkout or follow onto the base branch and trip the next run's clean-worktree guard.
+- **Branch from the base branch, and return to it after every issue.** `create_issue_branch` must start each new issue from `{{BASE_BRANCH}}` (`git checkout -b "$b" "$BASE_BRANCH"`), and the success path must `git checkout "$BASE_BRANCH"` after opening the PR. Otherwise, in a `--max-issues > 1` run, issue N branches off issue N-1's still-unmerged tip and its review diff includes the previous issue's code.
+- **Gate the correctness commit on a non-empty CODE diff**, not on `has_repo_changes_outside_logs`. `run_review` auto-approves an empty `code_diff`, so a model that only rewrote the `{{MEMORY_FILE}}` "Next Up" line would otherwise pass review and produce a memory-only "implemented" commit + PR. Use `[[ -n "$(code_diff)" ]]` (excludes `{{MEMORY_FILE}}`/logs) as the checkpoint guard — no code change means nothing was built.
+- **Review/no-op diffs must include new files.** Build every review diff and no-op hash from a *staged* diff (`stage_for_diff` + `git diff --cached <base>`), never plain `git diff <base>` — the latter omits untracked files, so a brand-new implementation file would be reviewed as an empty diff and silently approved. Use the `code_diff` / `code_hash` helpers everywhere a code diff is needed.
 - **Stage with `git add -A` + unstage `$LOGDIR`, not `git add -- . :(exclude)$LOGDIR`.** When the log dir is gitignored (the recommended setup), the `:(exclude)` pathspec makes `git add` exit 1 on the matched-but-ignored path, which kills the run under `set -e`. Plain `git add -A` skips ignored paths silently; follow with `git reset -q -- "$LOGDIR"` to keep logs out of commits when they are *not* ignored.
 - **`--dry-run` is side-effect-free.** It may select and print candidate work but must never mutate tracked files — no task-status flip, no commit, no PR. In the local task-list variant, guard `task_mark_status` (and any task-file write) behind `[[ "$DRY_RUN" != true ]]`; a dirtied task file would trip the next run's clean-worktree guard.
-- **Memory rules are mandatory** (see SKILL.md *Memory discipline*): the review diff must exclude `{{MEMORY_FILE}}`; the no-op `md5sum` comparison must exclude `{{MEMORY_FILE}}` and `$LOGDIR`; only `build_memory_update_prompt` writes the archive entry.
+- **Memory rules are mandatory** (see SKILL.md *Memory discipline*): the review diff must exclude `{{MEMORY_FILE}}`; the no-op `code_hash` comparison must exclude `{{MEMORY_FILE}}` and `$LOGDIR`; only `build_memory_update_prompt` writes the archive entry.
 - **Diff against `{{BASE_BRANCH}}`, not `BASE..HEAD`** — uncommitted fix-cycle changes must be visible to reviewers or the loop never converges.
 - **Share the review loop.** `review_until_pass` is the single A/B-review-plus-fix implementation; the correctness pass and the refactor re-validation both call it. Do not duplicate the review/no-op logic. It exposes `REVIEW_OUTCOME` (`clean` / `accepted-noop` / `failed`) so callers can tell a clean pass from a tolerated no-op.
-- **Checkpoint the correctness state before refactoring.** The correctness-approved work is committed (the per-issue checkpoint) *before* the refactor pass runs. This is what makes the second pass safe and is mandatory: a refactor that is not cleanly approved reverts to the checkpoint (`git reset --hard HEAD` + `git clean -fd`), so correctness work is never lost and a degraded refactor is never kept. Cleanly-reviewed refactors are folded in with `git commit --amend`; the final commit message is set in one closing amend.
-- **Refactor stage is gated, bounded, and never silently degrades.** It runs only after correctness passes, only when `REFACTOR=true`, and stops when a round changes nothing (`md5sum` no-op = converged) or `MAX_REFACTOR_ROUNDS` is reached. A round is **kept only when its re-review is `clean`** — failing checks, failing review, or a no-op fix cycle with findings still open (`REVIEW_OUTCOME != clean`) reverts that round. It is behavior-preserving simplification only — never a place to add features. `--no-refactor` must cleanly skip it.
+- **Checkpoint the correctness state before refactoring.** The correctness-approved work is committed (the per-issue checkpoint) *before* the refactor pass runs. This is what makes the second pass safe and is mandatory: a refactor that is not cleanly approved reverts to the checkpoint (`git reset --hard HEAD` + `git clean -fd -e "$LOGDIR"`), so correctness work is never lost and a degraded refactor is never kept. Cleanly-reviewed refactors are folded in with `git commit --amend`; the final commit message is set in one closing amend.
+- **Refactor stage is gated, bounded, and never silently degrades.** It runs only after correctness passes, only when `REFACTOR=true`, and stops when a round changes nothing (`code_hash` no-op = converged) or `MAX_REFACTOR_ROUNDS` is reached. A round is **kept only when its re-review is `clean`** — failing checks, failing review, or a no-op fix cycle with findings still open (`REVIEW_OUTCOME != clean`) reverts that round. It is behavior-preserving simplification only — never a place to add features. `--no-refactor` must cleanly skip it.
 - **Report the real history, with the right semantics.** The commit message reports the delivered A/B rounds (`DELIVERED_REVIEW_ROUNDS`: correctness plus accepted refactor re-reviews, not discarded refactor attempts) and `REFACTOR_ROUNDS`. The memory archive gets the correctness **fix** rounds (`review_rounds`) and `REFACTOR_ROUNDS` as *separate* arguments — never a conflated total — because "last fix" and "refactor rounds" are different facts; passing delivered review rounds into the "last fix" slot would imply fixes that never happened. `MEMORY.md` is part of the governance contract, so this accuracy is mandatory.
 - **Pipe prompts via stdin** in the generated runner functions to avoid "Argument list too long" on large diffs.
-- **Stdlib only** — bash + `git` + `gh` plus only the model CLIs the user explicitly selected. No extra deps unless governance lists them.
+- **Stdlib only** — bash + `git` + `gh` plus only the model CLIs the user explicitly selected. No extra deps unless governance lists them. In particular, hash code diffs with `git hash-object --stdin` (git is already required), **not** `md5sum`/`md5` — those are absent by default on macOS/Windows and would make the script die under `set -euo pipefail`.
 - **Privileged flags off by default** — only set `{{PERMISSION_MODE}}`/`{{SANDBOX}}` to bypass/danger levels when the user opted in (SKILL.md Step 3).
 - **Detached runs should be first-class** — keep the `--tmux-session` / `--tmux-log` path working so long unattended batches can be launched safely without rewriting the script wrapper.
 - **Stack-agnostic checks** — `run_checks` just iterates `CHECKS[]` from CLAUDE.md and `eval`s each command. Do not add runtime/manifest guards (`package.json`, `pyproject.toml`, …); the commands themselves are the toolchain. Empty `CHECKS[]` is a valid no-op pass.
