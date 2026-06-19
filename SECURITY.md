@@ -29,6 +29,24 @@ privileged operations itself. Of particular interest:
   that would weaken that sanitization, or otherwise let model-authored input reach a shell
   unescaped, are in scope.
 
+## Known scanner findings
+
+Static scanners may flag `eval "$cmd"` in the `auto-develop-template.md` blueprint (e.g. **Snyk**
+rates it medium risk under its OS-command-injection heuristic). This is a **known, mitigated
+false positive**, not an exploitable issue:
+
+- `run_checks` `eval`s each entry of `CHECKS[]`, which is **governance-authored** — the project's
+  own `CLAUDE.md` validation commands are the only source of the toolchain, and a stack-agnostic
+  pipeline must run arbitrary command strings (`a | b`, `cd x && y`) verbatim. This input is trusted
+  by construction; `eval` is the intended mechanism and is documented in `CLAUDE.md`.
+- The targeted-test gate `eval`s a command built from a **model-authored** `{TARGET}`, but that
+  value is sanitized against a strict allowlist (`^[][A-Za-z0-9_./:@=+#-]+$`) **before** substitution
+  (see *Scope* above), so no shell metacharacters can reach the shell.
+
+Reports that demonstrate a way *past* the `{TARGET}` allowlist, or that the `CHECKS[]` input can be
+influenced by an untrusted party, are in scope and welcome. A blanket "uses `eval`" scanner label,
+absent such a path, is expected and accepted.
+
 ## Supported versions
 
 The latest release is supported.
