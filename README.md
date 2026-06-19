@@ -9,7 +9,9 @@ implementation pipeline. **This repository ships the `governance-to-automation` 
 - **`governance-to-automation`** — *this repo*
   Generate and keep in sync an issue-driven `auto-develop.sh` pipeline (implement → check →
   dual-review → fix → refactor → re-review → commit → PR) plus its task source, prompt builders,
-  and logging, from existing governance.
+  and logging, from existing governance. Supports an **optional, opt-in test-discipline gate**:
+  a deterministic per-task test policy and a targeted red→green check, off by default and
+  backward-compatible when governance declares no test fields.
 - **`prd-to-governance`** — *separate skill:* <https://github.com/Karlderkarl/prd-to-governance>
   Create, update, and audit `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, and `MEMORY.md` from a PRD and the
   current repository state. It owns the **structure and update rules** of those governance files

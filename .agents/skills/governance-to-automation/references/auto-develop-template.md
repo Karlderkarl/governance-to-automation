@@ -16,9 +16,12 @@ Structural blueprint for the generated pipeline. It is a proven issue-driven loo
 | `{{REFERENCE_DOCS}}` | SOUL.md *Reference Documents* | `setup-guide.md` |
 | `{{GOVERNANCE_REVIEW_FOCUS}}` | SOUL.md + AGENTS.md (see prompt-builders.md) | concise security/coding rule list |
 | `{{PERMISSION_MODE}}` / `{{SANDBOX}}` | Step 3 user opt-in | `bypassPermissions` / `danger-full-access` |
+| `{{TEST_POLICY}}` / `{{TEST_ELIGIBILITY[]}}` | AGENTS.md *Auto-Develop Policy* | `required` plus `label:backend=include`, `title:^docs:=except` |
+| `{{TARGETED_TEST_CMD}}` | CLAUDE.md *Development Commands* | `pytest {TARGET}` / `pnpm test -- --runTestsByPath {TARGET}` |
 | `{{SKILL_MAP[]}}` | AGENTS.md *Skill Policy* + user-approved local entries (explicit matchers → skill) | `label:area:auth=security-hardening` — empty array only if both absent |
 
 For the **local task-list** source (no GitHub Issues), replace the `gh`-based candidate selection and PR/merge phases with: read the next unchecked task from the task-list file, branch, implement, check, review, commit, mark the task done. See `task-list-template.md`. Keep `--dry-run` **read-only** in this variant too: select/print the next task but do **not** flip its status or write the task file — a dirtied task file would trip the next run's clean-worktree guard. Skill resolution still runs once per task, but a task-list task has no labels — so only `title:` matchers (against the task title/body) can resolve a skill in this variant; call `resolve_skill` with an empty label string.
+The same deterministic rule applies to **test eligibility** in the task-list variant: with no labels available, only `title:` `TEST_ELIGIBILITY` matchers can make a task test-eligible; `label:` entries never match there, so a `label:`-only `except` set would fall through to the denylist base and must be flagged as governance drift during generation/audit rather than silently enabling tests for every task.
 
 ## Skeleton
 
@@ -89,6 +92,11 @@ BASE_BRANCH="{{BASE_BRANCH}}"
 MEMORY_FILE="{{MEMORY_FILE}}"
 ARCHIVE_FILE="{{ARCHIVE_FILE}}"
 CLAUDE_PERMISSION_MODE="{{PERMISSION_MODE}}"   # requires explicit user opt-in
+TEST_POLICY="{{TEST_POLICY}}"                  # off | preferred | required (opt-in; absent/empty => off)
+TARGETED_TEST_CMD="{{TARGETED_TEST_CMD}}"      # must contain {TARGET}; may be empty when policy is off
+TARGETED_TEST_FILE=""                          # set per issue inside process_issue
+FROZEN_TARGETED_TEST_TARGET=""                 # set once a RED target is validated; reused for all later GREEN reruns
+TEST_GATE_ACTIVE=false                         # per issue: true only when the HARD green gate is armed (required + confirmed RED)
 
 # Skill resolution: explicit matchers -> skill, seeded from AGENTS.md "Skill Policy".
 # Each entry is "<type>:<pattern>=<skill>" (whitespace around ':' and '=' is
@@ -102,6 +110,24 @@ CLAUDE_PERMISSION_MODE="{{PERMISSION_MODE}}"   # requires explicit user opt-in
 # an operator may also author entries locally (e.g. from a skill's own tags/triggers).
 SKILL_MAP=(
   {{FOR each entry in SKILL_MAP}} "{{entry}}"   # e.g. "label:area:auth=security-hardening"
+  {{END}}
+)
+
+# Test policy: explicit matchers -> include/except, seeded from AGENTS.md "Auto-Develop
+# Policy". Entirely absent is the valid no-op default (off). Deterministic resolution
+# (see resolve_test_policy) — `except` always wins over `include`, and the base default
+# for an unmatched task depends on whether any include matchers are DECLARED:
+#   task matches an except       -> exempt (off)                 [explicit deny beats allow]
+#   else task matches an include -> eligible
+#   else, include matchers declared -> not eligible (allowlist base)
+#   else (only except declared)     -> eligible (denylist base: "test all except …")
+# This makes "test everything except X" expressible with a single except matcher, and
+# is fully deterministic (no "ambiguous" outcome, no heuristic). `required` without
+# TARGETED_TEST_CMD is not silently enforced: the script degrades it to `preferred` and
+# logs [GOVERNANCE DRIFT]. A set policy with an EMPTY eligibility array is inert -> off
+# (and warned: governance is likely incomplete; should be caught at generation/audit).
+TEST_ELIGIBILITY=(
+  {{FOR each entry in TEST_ELIGIBILITY}} "{{entry}}"   # e.g. "label:backend=include"
   {{END}}
 )
 
@@ -141,6 +167,21 @@ log()  { echo "[auto-develop $(date +%H:%M:%S)] $*"; }
 die()  { log "FATAL: $*" >&2; exit 1; }
 # Strip leading/trailing whitespace (used to parse SKILL_MAP tolerantly).
 trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
+
+EFFECTIVE_TEST_POLICY="$(trim "$TEST_POLICY")"
+# Absent/empty (unfilled placeholder) is the valid backward-compatible default.
+[[ -z "$EFFECTIVE_TEST_POLICY" ]] && EFFECTIVE_TEST_POLICY="off"
+case "$EFFECTIVE_TEST_POLICY" in
+  off|preferred|required) ;;
+  *) log "WARN: unknown TEST_POLICY '$EFFECTIVE_TEST_POLICY'; treating as off."; EFFECTIVE_TEST_POLICY="off" ;;
+esac
+if [[ "$EFFECTIVE_TEST_POLICY" == "required" && -z "$TARGETED_TEST_CMD" ]]; then
+  EFFECTIVE_TEST_POLICY="preferred"
+  log "[GOVERNANCE DRIFT] AGENTS.md sets TEST_POLICY=required but CLAUDE.md has no TARGETED_TEST_CMD; degrading enforcement to preferred."
+fi
+if [[ -n "$TARGETED_TEST_CMD" && "$TARGETED_TEST_CMD" != *"{TARGET}"* ]]; then
+  die "TARGETED_TEST_CMD must contain a literal {TARGET} token"
+fi
 
 build_reexec_args() {
   local -a args
@@ -251,22 +292,199 @@ run_checks() {  # <logfile>
     done
   } > "$1"
   [[ "$failed" == false ]]; }
+resolve_test_policy() {  # <labels> <title> <body> <logdir>
+  local labels="$1" title="$2" body="$3" logdir="$4"
+  local text="$title"$'\n'"$body"
+  local -a reasons=() warnings=()
+  local entry lhs type pat effect matched type_ok regex_rc l include_count=0 except_count=0 decl_include=0 decl_except=0
+  RESOLVED_TEST_POLICY="off"
+  RESOLVED_TEST_REASON="test policy disabled"
+  if [[ "$EFFECTIVE_TEST_POLICY" == "off" ]]; then
+    {
+      echo "searched: labels=[$(printf '%s' "$labels" | tr '\n' ',')] title=[$title]"
+      echo "matches:   (none)"; echo "chosen:    off"; echo "reason:    $RESOLVED_TEST_REASON"
+    } > "$logdir/test-policy.log"
+    return 0
+  fi
+  # Policy is set but no eligibility matchers exist -> inert. Safe (off), but flag it:
+  # this is governance incompleteness ([NEEDS GOVERNANCE]) that generation/audit should
+  # have caught. Do not silently pretend testing is simply disabled.
+  if [[ ${#TEST_ELIGIBILITY[@]} -eq 0 ]]; then
+    RESOLVED_TEST_REASON="policy=$EFFECTIVE_TEST_POLICY but TEST_ELIGIBILITY is empty (inert) -> off"
+    {
+      echo "searched: labels=[$(printf '%s' "$labels" | tr '\n' ',')] title=[$title]"
+      echo "matches:   (none)"; echo "chosen:    off"; echo "reason:    $RESOLVED_TEST_REASON"
+    } > "$logdir/test-policy.log"
+    log "WARN: TEST_POLICY=$EFFECTIVE_TEST_POLICY but no TEST_ELIGIBILITY matchers — policy is inert (treat as [NEEDS GOVERNANCE]). See $logdir/test-policy.log"
+    return 0
+  fi
+  for entry in "${TEST_ELIGIBILITY[@]}"; do
+    [[ "$entry" == *=* ]] || { warnings+=("malformed TEST_ELIGIBILITY entry '$entry' (no '=include'/'=except')"); continue; }
+    effect="$(trim "${entry##*=}")"; lhs="${entry%=*}"
+    type="$(trim "${lhs%%:*}")"; pat="$(trim "${lhs#*:}")"
+    matched=false; type_ok=false
+    case "$type" in
+      label) type_ok=true; while IFS= read -r l; do [[ -n "$l" && "$l" == "$pat" ]] && matched=true; done <<< "$labels" ;;
+      title) if [[ "$text" =~ $pat ]] 2>/dev/null; then
+               type_ok=true; matched=true
+             else
+               regex_rc=$?
+               if [[ "$regex_rc" -eq 2 ]]; then
+                 warnings+=("invalid title: regex '$pat' (entry '$entry') — treated as no match")
+               else
+                 type_ok=true
+               fi
+             fi ;;
+      *)     warnings+=("unknown TEST_ELIGIBILITY matcher type '$type' in '$entry'") ;;
+    esac
+    # Only a WELL-FORMED matcher (known type, valid title regex, known effect) is allowed to drive
+    # the base default. A dead matcher (unknown type / invalid regex / unknown effect) must NOT
+    # silently arm the denylist base ("test all except …") and switch testing on for every task.
+    if [[ "$type_ok" == true ]]; then
+      case "$effect" in
+        include) decl_include=$((decl_include + 1)) ;;   # DECLARED, usable allow intent
+        except)  decl_except=$((decl_except + 1)) ;;      # DECLARED, usable deny intent
+        *)       warnings+=("unknown TEST_ELIGIBILITY effect '$effect' in '$entry'") ;;
+      esac
+    fi
+    [[ "$matched" == true ]] || continue
+    reasons+=("$type:$pat -> $effect")
+    case "$effect" in
+      include) include_count=$((include_count + 1)) ;;
+      except)  except_count=$((except_count + 1)) ;;
+    esac
+  done
+  # Deterministic precedence: except wins; then include; then base default by DECLARED, usable
+  # intent. The denylist base ("eligible unless excepted") fires ONLY when a usable except matcher
+  # was declared; with neither a usable include nor a usable except the set is inert -> fail safe
+  # to off (governance incompleteness, [NEEDS GOVERNANCE]) rather than testing every task.
+  if [[ "$except_count" -gt 0 ]]; then
+    RESOLVED_TEST_POLICY="off"
+    RESOLVED_TEST_REASON="exempt (except wins) via $(IFS='; '; echo "${reasons[*]}")"
+  elif [[ "$include_count" -gt 0 ]]; then
+    RESOLVED_TEST_POLICY="$EFFECTIVE_TEST_POLICY"
+    RESOLVED_TEST_REASON="eligible via $(IFS='; '; echo "${reasons[*]}")"
+  elif [[ "$decl_include" -gt 0 ]]; then
+    RESOLVED_TEST_POLICY="off"
+    RESOLVED_TEST_REASON="not test-eligible (allowlist base: include matchers declared, none matched)"
+  elif [[ "$decl_except" -gt 0 ]]; then
+    RESOLVED_TEST_POLICY="$EFFECTIVE_TEST_POLICY"
+    RESOLVED_TEST_REASON="eligible (denylist base: only except matchers declared, none matched)"
+  else
+    RESOLVED_TEST_POLICY="off"
+    RESOLVED_TEST_REASON="inert: no usable include/except matcher (all malformed/unknown/invalid) -> off"
+    warnings+=("TEST_ELIGIBILITY has no usable matcher — policy inert (treat as [NEEDS GOVERNANCE])")
+  fi
+  {
+    echo "searched: labels=[$(printf '%s' "$labels" | tr '\n' ',')] title=[$title]"
+    echo "matches:"; printf '  - %s\n' "${reasons[@]:-(none)}"
+    [[ ${#warnings[@]} -gt 0 ]] && { echo "warnings:"; printf '  - %s\n' "${warnings[@]}"; }
+    echo "chosen:    $RESOLVED_TEST_POLICY"
+    echo "reason:    $RESOLVED_TEST_REASON"
+  } > "$logdir/test-policy.log"
+  [[ ${#warnings[@]} -gt 0 ]] && log "WARN: ${#warnings[@]} TEST_ELIGIBILITY warning(s) — see $logdir/test-policy.log"
+  log "Resolved test policy: $RESOLVED_TEST_POLICY ($RESOLVED_TEST_REASON)"
+}
+read_targeted_test_target() {  # <file>
+  [[ -f "$1" ]] || return 1
+  local target
+  target="$(head -n 1 "$1" | tr -d '\r')"
+  [[ -n "$target" ]] || return 1
+  printf '%s' "$target"
+}
+# Deterministic, TARGETED red->green gate for a SINGLE test. This is a targeted TDD gate,
+# NOT a full no-regression gate: it proves only that the one designated test went red->green.
+# Broad regression protection is whatever CHECKS[] already provides (see KNOWN LIMITATION in
+# the generation rules below). Mode:
+#   expect_red   (test-first phase) -> pass(0) iff the target test exits NON-ZERO. This rejects a
+#                tautological always-green test, but it does NOT prove the failure is an assertion
+#                failure rather than a syntax/import/collection error: distinguishing those needs
+#                framework-specific exit codes, which this stack-agnostic gate must not assume.
+#                The "fails for the RIGHT reason" requirement is enforced by the test-authoring
+#                PROMPT plus the mandatory expect_green pass on the SAME target (a test that was
+#                red only from an import error must still be made to genuinely pass), NOT by exit
+#                parsing. See KNOWN LIMITATION in the generation rules below.
+#   expect_green (post-impl, default) -> ALWAYS reruns the target when one exists. If the hard
+#                gate was armed (TEST_GATE_ACTIVE, set ONLY under `required`), pass(0) iff the
+#                target test now PASSES. Under `preferred`, a still-red target is ADVISORY: it is
+#                logged, fed into one check-fix attempt, and may still ship unresolved without
+#                blocking the issue.
+run_targeted_test_gate() {  # <logfile> [expect_red|expect_green]
+  local logfile="$1" mode="${2:-expect_green}" target cmd rc=0 gate_mode="advisory"
+  [[ "$mode" == "expect_green" && "$TEST_GATE_ACTIVE" == true ]] && gate_mode="hard"
+  if [[ -z "$TARGETED_TEST_CMD" ]]; then
+    echo "SKIP: no TARGETED_TEST_CMD configured" > "$logfile"; return 0
+  fi
+  if [[ "$mode" == "expect_green" && -n "$FROZEN_TARGETED_TEST_TARGET" ]]; then
+    target="$FROZEN_TARGETED_TEST_TARGET"
+  elif ! target="$(read_targeted_test_target "$TARGETED_TEST_FILE")"; then
+    if [[ "$mode" == "expect_green" && "$gate_mode" != "hard" ]]; then
+      echo "SKIP: no targeted test target written to $TARGETED_TEST_FILE (advisory mode)" > "$logfile"; return 0
+    fi
+    echo "FAIL: no targeted test target written to $TARGETED_TEST_FILE" > "$logfile"; return 1
+  fi
+  # SECURITY: the target is model-authored (lower trust than governance-authored CHECKS[])
+  # and is substituted into an eval'd command. Allow only test-id/path characters — reject
+  # anything that could inject shell. (']' first and '-' last keep the bracket expr literal.)
+  if [[ ! "$target" =~ ^[][A-Za-z0-9_./:@=+#-]+$ ]]; then
+    if [[ "$mode" == "expect_green" && "$gate_mode" != "hard" ]]; then
+      echo "ADVISORY: targeted test target '$target' contains disallowed characters; preferred policy does not block" > "$logfile"; return 10
+    fi
+    echo "FAIL: targeted test target '$target' contains disallowed characters" > "$logfile"; return 1
+  fi
+  cmd="${TARGETED_TEST_CMD//\{TARGET\}/$target}"
+  { echo "=== ($mode) $cmd ==="; eval "$cmd" 2>&1; } > "$logfile" || rc=$?
+  if [[ "$mode" == "expect_red" ]]; then
+    [[ "$rc" -ne 0 ]] && {
+      FROZEN_TARGETED_TEST_TARGET="$target"
+      echo "RED OK (exit $rc): non-zero before implementation (reason not exit-verified — see expect_red note)" >> "$logfile"
+      echo "LOCKED TARGET: $FROZEN_TARGETED_TEST_TARGET" >> "$logfile"
+      return 0
+    }
+    echo "NOT RED (exit 0): target passes without implementation — tautological or behavior already exists" >> "$logfile"; return 1
+  fi
+  [[ "$rc" -eq 0 ]] && { echo "GREEN OK" >> "$logfile"; return 0; }
+  if [[ "$gate_mode" == "hard" ]]; then
+    echo "NOT GREEN (exit $rc)" >> "$logfile"; return 1
+  fi
+  echo "ADVISORY: target still red after implementation (exit $rc); preferred policy does not block" >> "$logfile"; return 10; }
 ensure_checks_pass() {  # <issue> <logdir> <prefix>
-  local cl="$2/$3.log"
-  run_checks "$cl" && { log "Checks passed."; return 0; }
-  log "Checks failed; auto-fixing..."
-  build_check_fix_prompt "$1" "$(cat "$cl")" "$2/$3-fix-prompt.txt"
+  local tl="$2/$3-targeted-test.log" cl="$2/$3.log" combo="$2/$3-combined.log" tg=0 rc=0
+  # Run BOTH (no &&-short-circuit): under `set -e` a skipped run_checks would leave $cl
+  # missing and the later `cat "$cl"` would abort the script before auto-fix. `|| x=$?`
+  # also keeps a failing check from tripping `set -e` while we capture its status.
+  run_targeted_test_gate "$tl" expect_green || tg=$?
+  run_checks "$cl" || rc=$?
+  [[ "$tg" -eq 0 && "$rc" -eq 0 ]] && { log "Checks passed."; return 0; }
+  if [[ "$tg" -eq 10 && "$rc" -eq 0 ]]; then
+    log "Targeted test remains advisory under preferred policy; checks are already green, so no auto-fix runs."
+    return 0
+  else
+    log "Checks failed; auto-fixing..."
+  fi
+  { cat "$tl" 2>/dev/null; echo; cat "$cl" 2>/dev/null; } > "$combo"
+  build_check_fix_prompt "$1" "$(cat "$combo")" "$2/$3-fix-prompt.txt"
   run_impl_model "$2/$3-fix-prompt.txt" > "$2/$3-fix.log" 2>&1
-  run_checks "$2/$3-rerun.log" && { log "Checks pass after fix."; return 0; }
+  tg=0; rc=0
+  run_targeted_test_gate "$2/$3-rerun-targeted-test.log" expect_green || tg=$?
+  run_checks "$2/$3-rerun.log" || rc=$?
+  [[ "$tg" -eq 0 && "$rc" -eq 0 ]] && { log "Checks pass after fix."; return 0; }
+  if [[ "$tg" -eq 10 && "$rc" -eq 0 ]]; then
+    log "Checks pass, but the targeted test remains red under preferred policy (advisory only)."
+    return 0
+  fi
   log "Checks still failing."; return 1; }
 
 # --- Prompt builders: see prompt-builders.md (write to temp files) ---
 # build_implementation_prompt / build_review_prompt / build_fix_prompt
 # / build_refactor_prompt / build_memory_update_prompt / build_check_fix_prompt
+# / build_test_authoring_prompt (test-first RED phase; only when the gate is available)
 # build_implementation_prompt, build_fix_prompt and build_refactor_prompt read the
 # globals RESOLVED_SKILL / RESOLVED_SKILL_REASON set by resolve_skill (below) and
 # inject a "Designated skill" block ONLY when RESOLVED_SKILL is a real skill. The
-# review, check-fix and memory prompts stay skill-neutral.
+# prompts may also read RESOLVED_TEST_POLICY / RESOLVED_TEST_REASON plus
+# TARGETED_TEST_FILE when governance opted into deterministic test enforcement.
+# The memory prompt stays skill-neutral and test-policy-neutral.
 
 # --- Deterministic skill resolution (see SKILL.md "Deterministic skill resolution").
 #     Resolve ONCE per task from SKILL_MAP, log searched/candidates/chosen/reason,
@@ -285,7 +503,7 @@ resolve_skill() {  # <labels> <title> <body> <logdir>
   local labels="$1" title="$2" body="$3" logdir="$4"
   local text="$title"$'\n'"$body"
   local -a reasons=() distinct=() warnings=()
-  local entry lhs type pat skill matched l d seen
+  local entry lhs type pat skill matched regex_rc l d seen
   for entry in "${SKILL_MAP[@]}"; do
     [[ "$entry" == *=* ]] || continue
     skill="$(trim "${entry##*=}")"; lhs="${entry%=*}"
@@ -298,8 +516,14 @@ resolve_skill() {  # <labels> <title> <body> <logdir>
       # An invalid ERE makes [[ =~ ]] return 2 (not 1). Don't let a typo silently
       # skip a configured skill with only noisy stderr: suppress the diagnostic,
       # detect rc 2, and record an explicit warning into skill-resolution.log.
-      title) if [[ "$text" =~ $pat ]] 2>/dev/null; then matched=true
-             elif [[ $? -eq 2 ]]; then warnings+=("invalid title: regex '$pat' (entry '$entry') — treated as no match"); fi ;;
+      title) if [[ "$text" =~ $pat ]] 2>/dev/null; then
+               matched=true
+             else
+               regex_rc=$?
+               if [[ "$regex_rc" -eq 2 ]]; then
+                 warnings+=("invalid title: regex '$pat' (entry '$entry') — treated as no match")
+               fi
+             fi ;;
       *)     log "WARN: unknown SKILL_MAP matcher type '$type' in '$entry'" ;;
     esac
     [[ "$matched" == true ]] || continue
@@ -429,6 +653,10 @@ process_issue() {  # <issue>
   body="$(gh issue view "$issue" --json body --jq '.body')"
   logdir="$(ensure_logdir "$issue")"
   branch="$(create_issue_branch "$issue" "$title")"; log "Branch: $branch"
+  TARGETED_TEST_FILE="$logdir/targeted-test.txt"
+  rm -f "$TARGETED_TEST_FILE"
+  FROZEN_TARGETED_TEST_TARGET=""
+  TEST_GATE_ACTIVE=false
 
   # 0. Resolve the designated skill ONCE for this task (deterministic; logged).
   #    Globals RESOLVED_SKILL / RESOLVED_SKILL_REASON are then injected by the
@@ -438,6 +666,37 @@ process_issue() {  # <issue>
   # Newline-join so multi-word labels ("good first issue") stay one token (see resolve_skill).
   labels="$(gh issue view "$issue" --json labels --jq '[.labels[].name]|join("\n")')"
   resolve_skill "$labels" "$title" "$body" "$logdir"
+  resolve_test_policy "$labels" "$title" "$body" "$logdir"
+
+  # 0a. Test-first (RED) sub-phase — only when a targeted test command exists and the task is
+  #     test-eligible. Author ONLY the test(s), prove the target is RED before any implementation.
+  #     The HARD red->green gate (TEST_GATE_ACTIVE -> enforced by ensure_checks_pass) is armed
+  #     ONLY under `required`: a confirmed RED then makes the post-impl green a blocking gate.
+#     Under `preferred` the test still ships and is rerun post-implementation, but green remains
+#     ADVISORY — `preferred` must never hard-block or discard correctness work (that is what
+#     `required` is for; see the asymmetric review channel). A confirmed RED target is FROZEN for
+#     the rest of the task, so later prompts cannot retarget the gate to a different test. When
+#     checks are already green, an advisory-only targeted-test miss is logged and returned as-is;
+#     the pipeline must not mutate code just to chase an optional green. For `required`, an
+#     unprovable RED fails the issue; `preferred` always continues with advisory guidance only.
+  if [[ "$RESOLVED_TEST_POLICY" != "off" && -n "$TARGETED_TEST_CMD" ]]; then
+    build_test_authoring_prompt "$issue" "$title" "$body" "$logdir/prompt-test.txt"
+    run_impl_model "$logdir/prompt-test.txt" > "$logdir/00-test-author.log" 2>&1 \
+      || { return_to_base; return 1; }
+    if run_targeted_test_gate "$logdir/00-test-red.log" expect_red; then
+      if [[ "$RESOLVED_TEST_POLICY" == "required" ]]; then
+        TEST_GATE_ACTIVE=true
+        log "RED confirmed before implementation; hard red->green gate is active (required)."
+      else
+        log "RED confirmed; preferred — the test ships and post-impl green is ADVISORY (no hard gate)."
+      fi
+    elif [[ "$RESOLVED_TEST_POLICY" == "required" ]]; then
+      log "[TEST GATE] required: no RED baseline (missing/invalid target, or test already green); cannot prove red->green. Failing issue."
+      return_to_base; return 1
+    else
+      log "[TEST GATE] preferred: no RED baseline; continuing with advisory test guidance only (no hard gate)."
+    fi
+  fi
 
   # 1. Implement
   build_implementation_prompt "$issue" "$title" "$body" "$logdir/prompt-impl.txt"
@@ -536,3 +795,6 @@ log "Done. Completed $COMPLETED issue(s)."
 - **Stack-agnostic checks** — `run_checks` just iterates `CHECKS[]` from CLAUDE.md and `eval`s each command. Do not add runtime/manifest guards (`package.json`, `pyproject.toml`, …); the commands themselves are the toolchain. Empty `CHECKS[]` is a valid no-op pass.
 - **No assumed model CLIs beyond what roles need** — Sonnet/Opus/Codex are examples, not defaults. Generate runner functions from the user-confirmed model/CLI plan and omit unused paths for single-review projects.
 - **Skill resolution is deterministic and logged.** `resolve_skill` runs exactly once per task (before implementation), seeded from `SKILL_MAP` (AGENTS.md *Skill Policy*). An empty `SKILL_MAP` is a valid no-op (`(none)`); exactly one distinct match is chosen; **more than one distinct match is `(ambiguous)` — inject nothing and log it, never pick one**. There is no registry, no network, and no semantic fallback. Every decision is written to `$logdir/skill-resolution.log` (`searched` / `candidates` / `chosen` / `reason`). The result is injected **only** into the implement/fix/refactor prompts — reviewers, check-fix, and the memory step stay skill-neutral.
+- **Test policy is equally deterministic and opt-in.** `TEST_POLICY=off` (or absent/empty, normalized to `off`) is the valid default. `TEST_ELIGIBILITY` uses only explicit `label:` / `title:` include-or-except matchers, resolved once per task and logged to `$logdir/test-policy.log`. Resolution is fully deterministic with no "ambiguous" outcome: **`except` wins over `include`**; otherwise an `include` match is eligible; otherwise the base default follows the **DECLARED, well-formed** matchers — allowlist (not eligible) when usable include matchers are declared, or denylist (eligible) when only usable except matchers are declared. Only well-formed matchers (known type, valid `title:` regex, known effect) drive the base default: a **dead** matcher (unknown type, invalid regex, malformed entry) is logged as a warning and must **not** arm the denylist base. A set whose eligibility array is empty **or contains no usable matcher** is inert → `off` **and warned** (governance incompleteness, `[NEEDS GOVERNANCE]`) — it never falls through to "test every task". There is no heuristic "behavioral change" detector.
+- **The gate is a red→green transition proof, not a green-only smoke test — but the RED *reason* is not exit-verified.** When the gate is available (policy enforced for the task **and** `TARGETED_TEST_CMD` set), a test-first sub-phase authors the test(s) and runs the target in `expect_red` mode **before** implementation — it must exit NON-ZERO (a tautological always-green test is rejected). **Honest scope:** a non-zero exit does *not* prove the failure is an assertion failure rather than a syntax/import/collection error — telling those apart needs framework-specific exit codes, which this stack-agnostic gate deliberately does not assume. "Fails for the right reason" is enforced by the **test-authoring prompt** (which demands an assertion-level failure, not a collection error) plus the post-impl rerun of the **same** target — not by parsing exit codes. Do not describe this as exit-verified. Once a RED target is confirmed, the script FREEZES that exact target for the rest of the task, so later prompts cannot retarget the proof to an easier test. The hard gate is armed (`TEST_GATE_ACTIVE`) **only under `required`** — there a confirmed RED makes the post-impl `expect_green` in `ensure_checks_pass` a blocking gate, and the pair proves the red→green *transition*. Under `preferred` the targeted test is still rerun after implementation, but an unresolved failure stays advisory rather than blocking the issue or triggering extra code mutation when `CHECKS[]` are already green. For `required`, an unprovable RED fails the issue; `preferred` degrades to advisory (no hard gate). The model writes exactly one affected test id/path to `TARGETED_TEST_FILE`; the script **sanitizes** it (test-id/path characters only) before substituting into `{TARGET}`, because that value is model-authored and reaches an `eval`. If AGENTS.md says `required` but CLAUDE.md has no `TARGETED_TEST_CMD`, the script logs `[GOVERNANCE DRIFT]` and degrades to `preferred` instead of pretending a hard gate exists.
+- **KNOWN LIMITATION — targeted gate, not a full no-regression gate (v1).** The red→green proof covers **only the one designated test**. It is deliberately *not* a general "no other test regressed" guarantee. Broad regression protection is exactly whatever `CHECKS[]` already runs and no more — so a project whose `CHECKS[]` is a full suite that is **already red before the task** will block the pipeline (every `CHECKS[]` command must pass), and a project whose `CHECKS[]` omits the suite gets no regression coverage beyond the single targeted test. Do not describe or generate this as a full no-regression gate. **Future extension (separate work):** capture a `CHECKS[]` baseline *only when the suite is green before the task*, compare after, and when the pre-task suite is already red, disable the no-regression comparison and log it clearly rather than blocking — see the matching note in SKILL.md.

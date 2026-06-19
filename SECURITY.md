@@ -20,6 +20,11 @@ privileged operations itself. Of particular interest:
   default are in scope.
 - `examples/auto-develop.payload-sample.sh` is a read-only sample carrying that project's opt-in
   privileged settings and must not be run in this repo.
+- The generated targeted-test gate substitutes a **model-authored** `{TARGET}` value into an
+  `eval`'d command. The template sanitizes it against a strict allowlist
+  (`^[][A-Za-z0-9_./:@=+#-]+$`) before substitution, rejecting any shell metacharacters. Patterns
+  that would weaken that sanitization, or otherwise let model-authored input reach a shell
+  unescaped, are in scope.
 
 ## Supported versions
 
@@ -27,4 +32,4 @@ The latest release is supported.
 
 | Version | Supported |
 |---|---|
-| 1.1.x | ✅ |
+| 1.2.x | ✅ |

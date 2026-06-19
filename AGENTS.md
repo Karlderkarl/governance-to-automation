@@ -20,6 +20,8 @@ Match the style of the files you touch. Skills share a vocabulary: uncertainty m
 ## Testing Guidelines
 No test framework. Validate changes by syntax- and lint-checking scripts and dry-running generated pipelines. When changing the skill, keep the **memory-discipline invariants** aligned with what `prd-to-governance` defines (diff exclusion of `MEMORY.md`, single overwritten "Next Up" line, archive-only completed work, no-op fix detection, `Depends on #N` blocking) — see `CLAUDE.md`.
 
+The optional **test-discipline** wiring carries its own invariants (see `CLAUDE.md` → *Deterministic test resolution*): absent fields default to `off`; eligibility resolves deterministically from explicit `label:` / `title:` matchers only (`except` beats `include`, inert sets fail safe to `off`); the gate proves one designated test red→green (not a full no-regression gate); `required` may hard-block but `preferred` stays advisory; and the model-authored `{TARGET}` is sanitized before it reaches an `eval`.
+
 ## Commit & Pull Request Guidelines
 Use Conventional Commit prefixes (`feat:`, `fix:`, `docs:`, `chore:`). Keep commits scoped to one concern. Pull requests should state the purpose, summarize the changed files, and note verification (`bash -n` / `shellcheck` / `--dry-run`).
 

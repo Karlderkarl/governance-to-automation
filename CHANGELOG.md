@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-19
+
+### Added
+- **Optional test-discipline contract** for generated pipelines: a `TEST_POLICY`
+  (`off` / `preferred` / `required`), an explicit `TEST_ELIGIBILITY[]` matcher set, and a
+  `TARGETED_TEST_CMD` carrying a `{TARGET}` token. Entirely absent fields are the valid
+  backward-compatible default (`off`) — existing governance keeps generating identical scripts.
+- **Deterministic test-eligibility resolution** (`resolve_test_policy`), mirroring skill
+  resolution: only explicit `label:` / `title:` `include`/`except` matchers, resolved once per
+  task and logged to `test-policy.log`. No "ambiguous" outcome — **`except` wins over `include`**,
+  then an `include` match is eligible, otherwise the base default follows the **declared,
+  well-formed** matchers (allowlist when usable `include`s are declared, denylist when only usable
+  `except`s are). A dead matcher (unknown type, invalid `title:` regex, malformed entry) is warned
+  and never arms the denylist base; an empty/inert set fails safe to `off` and warns
+  (`[NEEDS GOVERNANCE]`) — it never falls through to "test every task".
+- **Targeted RED→GREEN gate** (`run_targeted_test_gate` + a test-first sub-phase): for eligible
+  tasks the model authors the test *before* implementation and the script proves a non-zero (RED)
+  result first, then reruns the **same** target after implementation. The validated RED target is
+  frozen (`FROZEN_TARGETED_TEST_TARGET`) and reused for every GREEN rerun, so the proven transition
+  cannot be swapped for an always-green test. The hard, blocking gate (`TEST_GATE_ACTIVE`) is armed
+  **only under `required`**; under `preferred` a still-red target stays **advisory** and never
+  hard-blocks or discards correctness work.
+- **Asymmetric review enforcement**: `required` missing-tests are blocking numbered findings;
+  `preferred` missing-tests use a non-blocking `ADVISORY:` channel (a leading `LGTM` followed by
+  `ADVISORY:` lines still passes), so `preferred` can never silently collapse into `required`.
+- The test-discipline wiring is **task-source-general** — it is generated for the local task-list /
+  MEMORY.md variants as well as the GitHub-issue path (with `label:` matchers inert where a source
+  has no labels, exactly like skill resolution).
+
+### Security
+- The model-authored `{TARGET}` value reaches an `eval`'d command, so the script **sanitizes** it
+  against a strict allowlist (`^[][A-Za-z0-9_./:@=+#-]+$`) before substitution — rejecting (or, under
+  `preferred`, downgrading to advisory) any target containing shell metacharacters.
+
+### Changed
+- Honest-scope documentation: the gate is a **targeted TDD gate, not a full no-regression gate**.
+  It proves only the one designated test's red→green transition; broad regression coverage remains
+  whatever `CHECKS[]` already runs. A `required` policy without a `TARGETED_TEST_CMD` is degraded to
+  `preferred` with a logged `[GOVERNANCE DRIFT]` rather than pretending a hard gate exists.
+
 ## [1.1.4] - 2026-06-15
 
 ### Fixed
@@ -98,6 +138,7 @@ First stable release of the **governance-to-automation** skill.
 - **Safe staging** that does not abort under `set -e` when the log directory is gitignored.
 - `--dry-run` is **side-effect-free** (never mutates tracked files).
 
+[1.2.0]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.2.0
 [1.1.4]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.1.4
 [1.1.3]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.1.3
 [1.1.2]: https://github.com/Karlderkarl/governance-to-automation/releases/tag/v1.1.2
