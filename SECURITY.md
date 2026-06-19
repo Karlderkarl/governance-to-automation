@@ -16,10 +16,13 @@ example Bash script. The skill *generates* automation for other projects; it doe
 privileged operations itself. Of particular interest:
 
 - The generated `auto-develop.sh` keeps privileged flags (`bypassPermissions`, `danger-full-access`,
-  auto-merge) **off by default**, behind explicit user opt-in. Patterns that could weaken that
-  default are in scope.
-- `examples/auto-develop.payload-sample.sh` is a read-only sample carrying that project's opt-in
-  privileged settings and must not be run in this repo.
+  auto-merge) **off by default**: safe modes are shipped, the privileged values are never hardcoded,
+  and they are reached only via the `--unattended` / `--auto-merge` flags behind a runtime
+  `confirm_privileged_mode` gate (prompts `[y/N]`, refuses without a TTY unless `--yes` is given).
+  Patterns that could weaken that default — hardcoding a privileged mode, bypassing the gate, or
+  letting the `tmux` re-exec auto-`--yes` without a prior foreground confirmation — are in scope.
+- `examples/auto-develop.payload-sample.sh` is a read-only sample that mirrors the same
+  safe-by-default policy and must not be run in this repo.
 - The generated targeted-test gate substitutes a **model-authored** `{TARGET}` value into an
   `eval`'d command. The template sanitizes it against a strict allowlist
   (`^[][A-Za-z0-9_./:@=+#-]+$`) before substitution, rejecting any shell metacharacters. Patterns

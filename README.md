@@ -11,7 +11,9 @@ implementation pipeline. **This repository ships the `governance-to-automation` 
   dual-review → fix → refactor → re-review → commit → PR) plus its task source, prompt builders,
   and logging, from existing governance. Supports an **optional, opt-in test-discipline gate**:
   a deterministic per-task test policy and a targeted red→green check, off by default and
-  backward-compatible when governance declares no test fields.
+  backward-compatible when governance declares no test fields. Privileged execution
+  (`bypassPermissions` / `danger-full-access`) and auto-merge are **off by default** — reached only
+  via explicit `--unattended` / `--auto-merge` flags behind a runtime confirmation prompt.
 - **`prd-to-governance`** — *separate skill:* <https://github.com/Karlderkarl/prd-to-governance>
   Create, update, and audit `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, and `MEMORY.md` from a PRD and the
   current repository state. It owns the **structure and update rules** of those governance files

@@ -14,15 +14,18 @@
 #  current pipeline shape see
 #  .agents/skills/governance-to-automation/references/auto-develop-template.md.
 #
-#  It is project-specific and carries privileged defaults that were that
-#  project's EXPLICIT opt-in — they are NOT the skill's defaults:
-#    - CLAUDE_PERMISSION_MODE="bypassPermissions"
-#    - Reviewer B runs with `danger-full-access`
-#    - unconditional `gh pr merge --squash` (auto-merge)
-#    - hardcoded `master` base branch and pnpm PATH
-#  The skill itself ships these OFF by default and gates them behind explicit
-#  user opt-in (see ../CLAUDE.md and the template at
-#  .agents/skills/governance-to-automation/references/auto-develop-template.md).
+#  It is project-specific (hardcoded `master` base branch and pnpm PATH).
+#
+#  Privileged modes match the skill's policy: OFF by default, reachable only
+#  via explicit opt-in flags, and gated behind an interactive confirmation
+#  (`confirm_privileged_mode`) so an unattended run can never start silently:
+#    - --unattended  → Claude `bypassPermissions` + Codex `danger-full-access`
+#    - --auto-merge  → `gh pr merge --squash` (otherwise the run stops at the PR)
+#    - --yes         → skip the confirmation prompt (required for detached/tmux,
+#                      which has no TTY); the tmux re-exec adds it automatically
+#                      after the human confirms once in the foreground.
+#  See ../CLAUDE.md and the template at
+#  .agents/skills/governance-to-automation/references/auto-develop-template.md.
 #
 #  Treat this file as read-only reference. Do not execute it in this repo.
 # ============================================================================
@@ -54,6 +57,13 @@ Options:
   --review-b-effort <level>
                           Reviewer B reasoning effort (default: high)
   --max-rounds <n>       Max review-fix rounds per issue (default: 100)
+  --unattended           Opt in to privileged unattended execution:
+                         Claude bypassPermissions + Codex danger-full-access.
+                         OFF by default; prompts for confirmation (see --yes).
+  --auto-merge           Squash-merge the PR after a clean review.
+                         OFF by default; the run otherwise stops at the PR.
+  --yes                  Skip the privileged-mode confirmation prompt.
+                         Required for non-interactive/detached (tmux) runs.
   --dry-run              Show planned steps without executing
   --tmux-session <name>  Launch the run in a detached tmux session, then exit
   --tmux-log <path>      Log file for detached tmux runs
@@ -91,7 +101,16 @@ TMUX_LOGFILE="logs/auto-develop.tmux.log"
 NO_TMUX_REEXEC=false
 
 LOGDIR="logs/issues"
-CLAUDE_PERMISSION_MODE="bypassPermissions"
+
+# Privileged execution is OFF by default. --unattended raises both of these to
+# their privileged values; --auto-merge enables the squash-merge. Nothing here
+# runs unattended unless the operator opts in AND confirms (see
+# confirm_privileged_mode below).
+CLAUDE_PERMISSION_MODE="default"        # --unattended → bypassPermissions
+CODEX_SANDBOX_MODE="workspace-write"    # --unattended → danger-full-access
+UNATTENDED=false
+AUTO_MERGE=false
+ASSUME_YES=false                        # --yes: skip the interactive confirmation
 
 # Ensure pnpm is available regardless of how the script is invoked
 export PATH="/home/dev/.local/share/pnpm:$PATH"
@@ -110,6 +129,9 @@ while [[ $# -gt 0 ]]; do
     --review-b)    REVIEW_B_MODEL="$2";  shift 2 ;;
     --review-b-effort) REVIEW_B_EFFORT="$2"; shift 2 ;;
     --max-rounds)  MAX_ROUNDS="$2";      shift 2 ;;
+    --unattended)  UNATTENDED=true;      shift ;;
+    --auto-merge)  AUTO_MERGE=true;      shift ;;
+    --yes)         ASSUME_YES=true;      shift ;;
     --dry-run)     DRY_RUN=true;         shift ;;
     --tmux-session) TMUX_SESSION="$2";   shift 2 ;;
     --tmux-log)    TMUX_LOGFILE="$2";    shift 2 ;;
@@ -118,6 +140,12 @@ while [[ $# -gt 0 ]]; do
     *)             echo "Unknown option: $1"; usage; exit 1 ;;
   esac
 done
+
+# Raise the privileged values only when the operator explicitly opted in.
+if [[ "$UNATTENDED" == true ]]; then
+  CLAUDE_PERMISSION_MODE="bypassPermissions"
+  CODEX_SANDBOX_MODE="danger-full-access"
+fi
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -132,6 +160,39 @@ die() {
   exit 1
 }
 
+# Gate every privileged opt-in behind an explicit confirmation. A dry run never
+# touches anything, so it is exempt. With --yes (or no TTY + --yes) the prompt is
+# skipped; without a TTY and without --yes we refuse rather than block forever.
+confirm_privileged_mode() {
+  [[ "$DRY_RUN" == true ]] && return 0
+
+  local -a privileged=()
+  [[ "$CLAUDE_PERMISSION_MODE" == "bypassPermissions" ]] && \
+    privileged+=("Claude runs with --permission-mode=bypassPermissions (no per-action approval)")
+  [[ "$CODEX_SANDBOX_MODE" == "danger-full-access" ]] && \
+    privileged+=("Codex reviewer runs with --sandbox=danger-full-access")
+  [[ "$AUTO_MERGE" == true ]] && \
+    privileged+=("PRs are squash-merged automatically after a clean review")
+
+  [[ ${#privileged[@]} -eq 0 ]] && return 0   # fully safe defaults; nothing to confirm
+
+  log "PRIVILEGED UNATTENDED MODE requested:"
+  local item
+  for item in "${privileged[@]}"; do log "  - $item"; done
+
+  if [[ "$ASSUME_YES" == true ]]; then
+    log "Confirmed via --yes."
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    die "Privileged mode needs confirmation but no TTY is attached. Re-run with --yes."
+  fi
+
+  local reply=""
+  read -r -p "Proceed in privileged unattended mode? [y/N] " reply || true   # EOF (Ctrl-D) -> empty -> abort cleanly below
+  [[ "$reply" =~ ^[Yy]$ ]] || die "Aborted by operator."
+}
+
 build_reexec_args() {
   local -a args
   args+=(--max-issues "$MAX_ISSUES")
@@ -140,7 +201,11 @@ build_reexec_args() {
   args+=(--review-a "$REVIEW_A_MODEL" --review-a-effort "$REVIEW_A_EFFORT")
   args+=(--review-b "$REVIEW_B_MODEL" --review-b-effort "$REVIEW_B_EFFORT")
   args+=(--max-rounds "$MAX_ROUNDS")
+  [[ "$UNATTENDED" == true ]] && args+=(--unattended)
+  [[ "$AUTO_MERGE" == true ]] && args+=(--auto-merge)
   [[ "$DRY_RUN" == true ]] && args+=(--dry-run)
+  # The human already confirmed in the foreground; the detached run has no TTY.
+  args+=(--yes)
   args+=(--no-tmux-reexec)
   printf '%q ' "${args[@]}"
 }
@@ -164,6 +229,9 @@ launch_in_tmux_if_requested() {
   exit 0
 }
 
+# Confirm before detaching, so the human approves in the foreground and the
+# detached tmux child inherits the approval via the propagated --yes.
+confirm_privileged_mode
 launch_in_tmux_if_requested
 
 # Map short model names to the IDs that `claude -p --model` expects.
@@ -644,7 +712,7 @@ run_review() {
 
   log "Running $reviewer_label review with model=$reviewer_model..."
   if [[ "$reviewer_label" == "Reviewer B (Codex)" ]]; then
-    run_codex_model "$reviewer_model" "$reviewer_effort" "danger-full-access" "$prompt_file" > "$logfile" 2>&1
+    run_codex_model "$reviewer_model" "$reviewer_effort" "$CODEX_SANDBOX_MODE" "$prompt_file" > "$logfile" 2>&1
   else
     run_claude_model "$reviewer_model" "$reviewer_effort" "$prompt_file" > "$logfile" 2>&1
   fi
@@ -839,6 +907,13 @@ Closes #${issue}
 See \`logs/issues/${issue}/\` for full pipeline output.
 EOF
 )" 2>&1 | tee "$logdir/05-pr.log"
+
+  if [[ "$AUTO_MERGE" != true ]]; then
+    log "PR opened for #$issue. Auto-merge is OFF (enable with --auto-merge); stopping for human review."
+    restore_branch "$original_branch"
+    log "=== Pipeline complete for #$issue (PR awaiting review) ==="
+    return 0
+  fi
 
   log "Merging pull request..."
   if ! gh pr merge "$branch" --squash 2>&1 | tee -a "$logdir/06-merge.log"; then

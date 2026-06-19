@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-06-19
+
+### Added
+- **Runtime privileged-mode confirmation gate** in the generated pipeline (`confirm_privileged_mode`).
+  Privileged execution is now OFF by default: scripts ship `CLAUDE_PERMISSION_MODE="default"` and
+  `CODEX_SANDBOX_MODE="workspace-write"`, and reach `bypassPermissions` / `danger-full-access` only
+  via the explicit `--unattended` flag. Auto-merge is likewise opt-in via `--auto-merge` (the run
+  otherwise stops at the PR per issue). Before any privileged run the script lists the requested
+  privileges and prompts `[y/N]`; `--yes` skips the prompt (required for non-interactive/detached
+  runs), and with no TTY and no `--yes` the run refuses rather than blocking. The `tmux` re-exec
+  propagates the opt-in flags plus `--yes`, so the human confirms once in the foreground and the
+  detached child never re-prompts.
+
+### Changed
+- The privileged values `bypassPermissions` / `danger-full-access` and the squash-merge are no
+  longer hardcoded as defaults anywhere — including the `examples/auto-develop.payload-sample.sh`
+  fixture, which previously carried that project's opt-in defaults and tripped static security
+  scanners (Socket/Snyk). The `{{PERMISSION_MODE}}` / `{{SANDBOX}}` template placeholders are
+  replaced by the runtime opt-in mechanism.
+- SKILL.md clarifies the commit/merge policy: "stop at PR" is the *per-issue* terminal step (open
+  the PR, do not merge); a `--max-issues N` batch still proceeds to the next eligible issue rather
+  than halting the whole run.
+
+### Fixed
+- Auto-merge failures are no longer reported as completed issues: the template now returns non-zero
+  on a failed `gh pr merge` / `git pull`, matching the sample fixture (the loop no longer counts a
+  failed merge as a delivered issue).
+- The confirmation prompt aborts cleanly on EOF (Ctrl-D) with "Aborted by operator." instead of a
+  silent `set -e` exit (`read … || true`).
+
 ## [1.2.0] - 2026-06-19
 
 ### Added

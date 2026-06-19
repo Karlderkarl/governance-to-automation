@@ -15,7 +15,7 @@ Structural blueprint for the generated pipeline. It is a proven issue-driven loo
 | `{{MEMORY_FILE}}` / `{{ARCHIVE_FILE}}` | MEMORY.md *Update Rules* | `MEMORY.md` / `memory/completed-phases.md` |
 | `{{REFERENCE_DOCS}}` | SOUL.md *Reference Documents* | `setup-guide.md` |
 | `{{GOVERNANCE_REVIEW_FOCUS}}` | SOUL.md + AGENTS.md (see prompt-builders.md) | concise security/coding rule list |
-| `{{PERMISSION_MODE}}` / `{{SANDBOX}}` | Step 3 user opt-in | `bypassPermissions` / `danger-full-access` |
+| privileged execution | Step 3 user opt-in | **Not** a placeholder — generated scripts ship safe defaults (`default` / `workspace-write`) and reach privileged modes only via the runtime `--unattended` / `--auto-merge` flags behind `confirm_privileged_mode`. Never hardcode `bypassPermissions` / `danger-full-access` as a default. |
 | `{{TEST_POLICY}}` / `{{TEST_ELIGIBILITY[]}}` | AGENTS.md *Auto-Develop Policy* | `required` plus `label:backend=include`, `title:^docs:=except` |
 | `{{TARGETED_TEST_CMD}}` | CLAUDE.md *Development Commands* | `pytest {TARGET}` / `pnpm test -- --runTestsByPath {TARGET}` |
 | `{{SKILL_MAP[]}}` | AGENTS.md *Skill Policy* + user-approved local entries (explicit matchers → skill) | `label:area:auth=security-hardening` — empty array only if both absent |
@@ -44,6 +44,13 @@ Options:
   --max-rounds <n>         Max review-fix rounds per issue (default: 100)
   --no-refactor            Skip the post-review simplification pass
   --max-refactor-rounds <n> Max simplify->re-review rounds (default: 3)
+  --unattended             Opt in to privileged unattended execution
+                           (bypassPermissions + danger-full-access). OFF by
+                           default; prompts for confirmation (see --yes).
+  --auto-merge             Squash-merge the PR after a clean review (OFF by default;
+                           the run otherwise stops at the PR for human review).
+  --yes                    Skip the privileged-mode confirmation prompt.
+                           Required for non-interactive/detached (tmux) runs.
   --dry-run                Show planned work without executing model steps
   --tmux-session <name>    Launch the run in a detached tmux session, then exit
   --tmux-log <path>        Log file for detached tmux runs
@@ -91,7 +98,16 @@ LOGDIR="logs/issues"
 BASE_BRANCH="{{BASE_BRANCH}}"
 MEMORY_FILE="{{MEMORY_FILE}}"
 ARCHIVE_FILE="{{ARCHIVE_FILE}}"
-CLAUDE_PERMISSION_MODE="{{PERMISSION_MODE}}"   # requires explicit user opt-in
+# Privileged execution is OFF by default. Do NOT hardcode bypassPermissions /
+# danger-full-access as defaults — that is exactly what static scanners flag and
+# what SKILL.md Step 3 forbids without explicit opt-in. --unattended raises both
+# modes to their privileged values; --auto-merge enables the squash-merge. Nothing
+# runs unattended unless the operator opts in AND confirms (confirm_privileged_mode).
+CLAUDE_PERMISSION_MODE="default"               # --unattended -> bypassPermissions
+CODEX_SANDBOX_MODE="workspace-write"           # --unattended -> danger-full-access (used by a sandboxed reviewer CLI, e.g. codex)
+UNATTENDED=false
+AUTO_MERGE=false
+ASSUME_YES=false                               # --yes: skip the interactive confirmation (required for detached/tmux)
 TEST_POLICY="{{TEST_POLICY}}"                  # off | preferred | required (opt-in; absent/empty => off)
 TARGETED_TEST_CMD="{{TARGETED_TEST_CMD}}"      # must contain {TARGET}; may be empty when policy is off
 TARGETED_TEST_FILE=""                          # set per issue inside process_issue
@@ -154,6 +170,9 @@ while [[ $# -gt 0 ]]; do
     --refactor)        REFACTOR=true;         shift ;;
     --no-refactor)     REFACTOR=false;        shift ;;
     --max-refactor-rounds) MAX_REFACTOR_ROUNDS="$2"; shift 2 ;;
+    --unattended)      UNATTENDED=true;       shift ;;
+    --auto-merge)      AUTO_MERGE=true;       shift ;;
+    --yes)             ASSUME_YES=true;       shift ;;
     --dry-run)         DRY_RUN=true;          shift ;;
     --tmux-session)    TMUX_SESSION="$2";     shift 2 ;;
     --tmux-log)        TMUX_LOGFILE="$2";     shift 2 ;;
@@ -163,8 +182,35 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Raise the privileged values only when the operator explicitly opted in.
+if [[ "$UNATTENDED" == true ]]; then
+  CLAUDE_PERMISSION_MODE="bypassPermissions"
+  CODEX_SANDBOX_MODE="danger-full-access"
+fi
+
 log()  { echo "[auto-develop $(date +%H:%M:%S)] $*"; }
 die()  { log "FATAL: $*" >&2; exit 1; }
+
+# Gate every privileged opt-in behind an explicit confirmation. A dry run touches
+# nothing, so it is exempt. With --yes the prompt is skipped; without a TTY and
+# without --yes we refuse rather than block a detached run forever.
+confirm_privileged_mode() {
+  [[ "$DRY_RUN" == true ]] && return 0
+  local -a privileged=()
+  [[ "$CLAUDE_PERMISSION_MODE" == "bypassPermissions" ]] && \
+    privileged+=("Claude runs with --permission-mode=bypassPermissions (no per-action approval)")
+  [[ "$CODEX_SANDBOX_MODE" == "danger-full-access" ]] && \
+    privileged+=("sandboxed reviewer CLI runs with --sandbox=danger-full-access")
+  [[ "$AUTO_MERGE" == true ]] && \
+    privileged+=("PRs are squash-merged automatically after a clean review")
+  [[ ${#privileged[@]} -eq 0 ]] && return 0   # fully safe defaults; nothing to confirm
+  log "PRIVILEGED UNATTENDED MODE requested:"
+  local item; for item in "${privileged[@]}"; do log "  - $item"; done
+  if [[ "$ASSUME_YES" == true ]]; then log "Confirmed via --yes."; return 0; fi
+  [[ -t 0 ]] || die "Privileged mode needs confirmation but no TTY is attached. Re-run with --yes."
+  local reply=""; read -r -p "Proceed in privileged unattended mode? [y/N] " reply || true  # EOF -> empty -> clean abort
+  [[ "$reply" =~ ^[Yy]$ ]] || die "Aborted by operator."
+}
 # Strip leading/trailing whitespace (used to parse SKILL_MAP tolerantly).
 trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
 
@@ -193,7 +239,11 @@ build_reexec_args() {
   args+=(--max-rounds "$MAX_ROUNDS")
   [[ "$REFACTOR" == false ]] && args+=(--no-refactor)
   args+=(--max-refactor-rounds "$MAX_REFACTOR_ROUNDS")
+  [[ "$UNATTENDED" == true ]] && args+=(--unattended)
+  [[ "$AUTO_MERGE" == true ]] && args+=(--auto-merge)
   [[ "$DRY_RUN" == true ]] && args+=(--dry-run)
+  # The human already confirmed in the foreground; the detached run has no TTY.
+  args+=(--yes)
   args+=(--no-tmux-reexec)
   printf '%q ' "${args[@]}"
 }
@@ -214,6 +264,9 @@ launch_in_tmux_if_requested() {
   exit 0
 }
 
+# Confirm before detaching, so the human approves in the foreground and the
+# detached tmux child inherits the approval via the propagated --yes.
+confirm_privileged_mode
 launch_in_tmux_if_requested
 
 # --- Worktree guards: never mix pre-existing changes into the run ---
@@ -751,7 +804,18 @@ Closes #$issue" >/dev/null
   # Return to BASE_BRANCH so the NEXT issue branches from a clean base rather than stacking
   # on this still-unmerged branch. Safe: everything is committed at this point.
   git checkout "$BASE_BRANCH" >/dev/null 2>&1 || log "WARN: could not return to $BASE_BRANCH"
-  # {{IF auto-merge opted in}} gh pr merge "$branch" --squash && git pull   # already on $BASE_BRANCH
+  # Auto-merge ONLY when the operator opted in (and confirmed); otherwise stop at the
+  # PR for human review. Already on $BASE_BRANCH, so a successful merge + pull is safe.
+  if [[ "$AUTO_MERGE" == true ]]; then
+    # A failed merge/pull must NOT count as a completed issue (matches the sample fixture):
+    # report the failure so the loop's `|| log "...failed"` fires and the issue is not counted.
+    if ! { gh pr merge "$branch" --squash && git pull; }; then
+      log "ERROR: auto-merge/pull failed for #$issue; PR left open for manual handling."
+      return 1
+    fi
+  else
+    log "PR opened for #$issue; auto-merge OFF (enable with --auto-merge). Awaiting human review."
+  fi
   log "=== Done #$issue ==="; }
 
 # --- Candidate selection + main loop ---
@@ -790,7 +854,7 @@ log "Done. Completed $COMPLETED issue(s)."
 - **Report the real history, with the right semantics.** The commit message reports the delivered A/B rounds (`DELIVERED_REVIEW_ROUNDS`: correctness plus accepted refactor re-reviews, not discarded refactor attempts) and `REFACTOR_ROUNDS`. The memory archive gets the correctness **fix** rounds (`review_rounds`) and `REFACTOR_ROUNDS` as *separate* arguments — never a conflated total — because "last fix" and "refactor rounds" are different facts; passing delivered review rounds into the "last fix" slot would imply fixes that never happened. `MEMORY.md` is part of the governance contract, so this accuracy is mandatory.
 - **Pipe prompts via stdin** in the generated runner functions to avoid "Argument list too long" on large diffs.
 - **Stdlib only** — bash + `git` + `gh` plus only the model CLIs the user explicitly selected. No extra deps unless governance lists them. In particular, hash code diffs with `git hash-object --stdin` (git is already required), **not** `md5sum`/`md5` — those are absent by default on macOS/Windows and would make the script die under `set -euo pipefail`.
-- **Privileged flags off by default** — only set `{{PERMISSION_MODE}}`/`{{SANDBOX}}` to bypass/danger levels when the user opted in (SKILL.md Step 3).
+- **Privileged flags off by default, behind a runtime confirmation.** Generated scripts must ship safe defaults (`CLAUDE_PERMISSION_MODE="default"`, `CODEX_SANDBOX_MODE="workspace-write"`, `AUTO_MERGE=false`) and reach privileged modes only via the `--unattended` / `--auto-merge` flags. Do **not** hardcode `bypassPermissions` / `danger-full-access` / an unconditional `gh pr merge` as defaults — that is what static scanners (Socket/Snyk) flag and what SKILL.md Step 3 forbids without explicit opt-in. Keep `confirm_privileged_mode` and its call before `launch_in_tmux_if_requested`: it lists the requested privileges and prompts `[y/N]`, is skipped by `--dry-run` and `--yes`, and **refuses** (rather than blocks) when no TTY is attached and `--yes` was not given. The tmux re-exec must propagate `--unattended`/`--auto-merge` and append `--yes`, so the human confirms once in the foreground and the detached child does not re-prompt. A sandboxed reviewer CLI (e.g. `codex exec`) takes its `--sandbox` from `$CODEX_SANDBOX_MODE`, never a literal.
 - **Detached runs should be first-class** — keep the `--tmux-session` / `--tmux-log` path working so long unattended batches can be launched safely without rewriting the script wrapper.
 - **Stack-agnostic checks** — `run_checks` just iterates `CHECKS[]` from CLAUDE.md and `eval`s each command. Do not add runtime/manifest guards (`package.json`, `pyproject.toml`, …); the commands themselves are the toolchain. Empty `CHECKS[]` is a valid no-op pass.
 - **No assumed model CLIs beyond what roles need** — Sonnet/Opus/Codex are examples, not defaults. Generate runner functions from the user-confirmed model/CLI plan and omit unused paths for single-review projects.
