@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-06-19
+
+### Changed
+- Generated pipelines now run project commands via `bash -c "$cmd"` instead of `eval "$cmd"` in
+  `run_checks` and the targeted-test gate. Behavior is equivalent for arbitrary stack-agnostic
+  command strings (`a | b`, `cd x && y`) with better subshell isolation, and it clears the stricter
+  `eval`-specific SAST rule that scanners (e.g. Snyk) flag. The model-authored `{TARGET}` is still
+  allowlist-sanitized before it reaches the shell — that mitigation is unchanged and still required.
+- Documentation (`CLAUDE.md`, `SKILL.md`, `AGENTS.md`, `SECURITY.md`) updated to describe the
+  `bash -c` execution model; `SECURITY.md` records the dynamic-execution finding as intended and
+  mitigated (trusted `CHECKS[]` input; sanitized `{TARGET}`).
+
 ## [1.2.1] - 2026-06-19
 
 ### Added

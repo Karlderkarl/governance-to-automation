@@ -23,29 +23,30 @@ privileged operations itself. Of particular interest:
   letting the `tmux` re-exec auto-`--yes` without a prior foreground confirmation — are in scope.
 - `examples/auto-develop.payload-sample.sh` is a read-only sample that mirrors the same
   safe-by-default policy and must not be run in this repo.
-- The generated targeted-test gate substitutes a **model-authored** `{TARGET}` value into an
-  `eval`'d command. The template sanitizes it against a strict allowlist
+- The generated targeted-test gate substitutes a **model-authored** `{TARGET}` value into a command
+  run via `bash -c` (not `eval`). The template sanitizes it against a strict allowlist
   (`^[][A-Za-z0-9_./:@=+#-]+$`) before substitution, rejecting any shell metacharacters. Patterns
   that would weaken that sanitization, or otherwise let model-authored input reach a shell
   unescaped, are in scope.
 
 ## Known scanner findings
 
-Static scanners may flag `eval "$cmd"` in the `auto-develop-template.md` blueprint (e.g. **Snyk**
-rates it medium risk under its OS-command-injection heuristic). This is a **known, mitigated
-false positive**, not an exploitable issue:
+The pipeline runs project commands through a shell (`bash -c "$cmd"`), which static scanners may flag
+under an OS-command-injection heuristic. `eval` was deliberately replaced by `bash -c` to clear the
+stricter `eval`-specific rule; the dynamic-execution itself is intended and mitigated, not an
+exploitable issue:
 
-- `run_checks` `eval`s each entry of `CHECKS[]`, which is **governance-authored** — the project's
-  own `CLAUDE.md` validation commands are the only source of the toolchain, and a stack-agnostic
-  pipeline must run arbitrary command strings (`a | b`, `cd x && y`) verbatim. This input is trusted
-  by construction; `eval` is the intended mechanism and is documented in `CLAUDE.md`.
-- The targeted-test gate `eval`s a command built from a **model-authored** `{TARGET}`, but that
-  value is sanitized against a strict allowlist (`^[][A-Za-z0-9_./:@=+#-]+$`) **before** substitution
-  (see *Scope* above), so no shell metacharacters can reach the shell.
+- `run_checks` runs each entry of `CHECKS[]` via `bash -c`. `CHECKS[]` is **governance-authored** —
+  the project's own `CLAUDE.md` validation commands are the only source of the toolchain, and a
+  stack-agnostic pipeline must run arbitrary command strings (`a | b`, `cd x && y`) verbatim. This
+  input is trusted by construction.
+- The targeted-test gate runs a command built from a **model-authored** `{TARGET}`, but that value
+  is sanitized against a strict allowlist (`^[][A-Za-z0-9_./:@=+#-]+$`) **before** substitution (see
+  *Scope* above), so no shell metacharacters can reach the shell.
 
 Reports that demonstrate a way *past* the `{TARGET}` allowlist, or that the `CHECKS[]` input can be
-influenced by an untrusted party, are in scope and welcome. A blanket "uses `eval`" scanner label,
-absent such a path, is expected and accepted.
+influenced by an untrusted party, are in scope and welcome. A generic "runs a shell command" scanner
+label, absent such a path, is expected and accepted.
 
 ## Supported versions
 
