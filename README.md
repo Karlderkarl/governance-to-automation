@@ -1,5 +1,15 @@
 # Governance Skills
 
+> ⚠️ **Superseded by [`Karlderkarl/PRD-to-automation`](https://github.com/Karlderkarl/PRD-to-automation).**
+> This skill lives on, with unchanged behaviour, as the **automate** mode of that single skill, which merges
+> `prd-to-governance` (1.2.0) and `governance-to-automation` (1.2.2). Install the successor with:
+>
+> ```bash
+> npx skills add Karlderkarl/PRD-to-automation
+> ```
+>
+> `governance-to-automation` remains installable under this name but is no longer developed.
+
 Turn project requirements into governance files, then turn that governance into an automated
 implementation pipeline. **This repository ships the `governance-to-automation` skill.**
 `prd-to-governance` is a separate, companion skill with its own repo.
